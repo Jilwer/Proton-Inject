@@ -51,3 +51,5 @@ desktop.ini
 # --- debug symbols ---
 *.pdb
 *.dSYM/
+embedded/assets/injector.exe
+embedded/assets/loader.dll
