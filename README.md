@@ -4,6 +4,11 @@
   <img width="800" height="776" alt="Screenshot_20260426_181132" src="https://github.com/user-attachments/assets/f610966b-23a6-4c3c-9985-39847ab490ef" />
 </p>
 
+
+## Download
+
+Download the latest release from the [release page](https://github.com/Jilwer/Proton-Inject/releases/latest).
+
 ## Architecture & Features
 
 - This program is primarily written in Go and Rust and uses the Fyne GUI library.
