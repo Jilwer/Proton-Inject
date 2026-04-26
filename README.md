@@ -1,18 +1,27 @@
 # Proton Inject
 
+<p align="center">
+  <img width="800" height="776" alt="Screenshot_20260426_181132" src="https://github.com/user-attachments/assets/f610966b-23a6-4c3c-9985-39847ab490ef" />
+</p>
+
 ## Architecture & Features
-- This program is primarily made using Go and Rust with the Fyne GUI library. 
-- Both the Injector and Loader are embedded directly into the main program using Go's EmbedFS
-- The GUI wraps a embedded CRT+LL injector that is built in rust to inject our DLLs.
-- We have a frontend wrapper for our injector `injector_wrap.go` that is built directly into the main program, this utilizes `protontricks-launch` to run the injector in the correct proton context to achieve dll injection into the correct target process
-- It ships with a fully optional loader dll that the injector may utilize. This creates a `proton-inject-go` mods folder under the target proton/wine prefix's Documents folder, with GUI helpers to access this directory
-- Profiles system so you can save your game profiles without needing to recall game details like Steam AppID
+
+- This program is primarily written in Go and Rust and uses the Fyne GUI library.
+- Both the injector and loader are embedded directly into the main program using Go's `embed.FS`.
+- The GUI wraps an embedded CRT+LL injector written in Rust, which is used to inject our DLLs.
+- We have a frontend wrapper for the injector, `injector_wrap.go`, that is built directly into the main program. This uses `protontricks-launch` to run the injector in the correct Proton context, ensuring DLL injection into the correct target process.
+- The tool ships with an optional loader DLL that the injector can use. This creates a `proton-inject-go` `mods` folder under the target Proton/Wine prefix's `Documents` directory, with GUI helpers to quickly access this folder.
+- A profiles system lets you save game profiles so you do not need to remember details such as the Steam AppID.
+
 ## Building
-Requirements
-- A C compiler (fyne uses cgo)
+
+Requirements:
+
+- A C compiler (Fyne uses cgo)
 - Go
 - Rust
 - Make
-`make build` or `make release`
 
-This code is licensed under the GNU GPL v3. Please see the [LICENSE](LICENSE) file for more details
+Run `make build` or `make release`.
+
+This code is licensed under the GNU GPL v3. Please see the [LICENSE](LICENSE) file for more details.
