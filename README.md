@@ -12,6 +12,11 @@
 - We have a frontend wrapper for the injector, `injector_wrap.go`, that is built directly into the main program. This uses `protontricks-launch` to run the injector in the correct Proton context, ensuring DLL injection into the correct target process.
 - The tool ships with an optional loader DLL that the injector can use. This creates a `proton-inject-go` `mods` folder under the target Proton/Wine prefix's `Documents` directory, with GUI helpers to quickly access this folder.
 - A profiles system lets you save game profiles so you do not need to remember details such as the Steam AppID.
+- It ships as one fully portable binary, installation not required, but can be achieved manually
+
+
+## Installation
+Either download the compiled binary from the release page, or build yourself. I will not be maintaining this on any package repo's, and system installation lies upon the user if it is wanted.
 
 ## Building
 
