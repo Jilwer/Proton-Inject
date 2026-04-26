@@ -5,8 +5,8 @@ import (
 	"os"
 	"slices"
 
-	"github.com/proton-inject-go/cli"
-	"github.com/proton-inject-go/gui"
+	"github.com/Jilwer/Proton-Inject/cli"
+	"github.com/Jilwer/Proton-Inject/gui"
 )
 
 var version = "0.1.0"

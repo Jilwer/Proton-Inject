@@ -1,4 +1,4 @@
-module github.com/proton-inject-go
+module github.com/Jilwer/Proton-Inject
 
 go 1.26
 
