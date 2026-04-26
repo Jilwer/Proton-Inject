@@ -27,7 +27,7 @@ Either download the compiled binary from the release page, or build yourself. I 
 
 ## F.A.Q
 ### Why CRT+LL only?
-CRT+LL (CreateRemoteThread + LoadLibrary) is currently the most reliable method under Proton/Wine. Other injection methods tend to break due to Wine translation layers, and have poor compatibility across games. In my experience CRT+LL is sufficiently stealthy, and I have not run across any detections thus far, more injection methods may be added if the story changes at a later date.
+CRT+LL (CreateRemoteThread + LoadLibrary) is currently the most reliable method under Proton/Wine. Other injection methods tend to break due to Wine translation layers, and have poor compatibility across games. In my experience CRT+LL is sufficiently stealthy under wine/proton (a vastly different story on windows), however I have not run across any detections thus far, and more injection methods may be added if the story changes at a later date.
 
 ### Where are mods stored?
 `<Proton Prefix>/drive_c/users/steamuser/Documents/proton-inject-mods`
