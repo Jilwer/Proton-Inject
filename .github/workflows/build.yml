@@ -51,7 +51,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: Proton-Inject
-          path: Proton-Inject-linux-amd64.tar.gz
+          path: release/
           retention-days: 90
 
       - name: Publish GitHub Release
