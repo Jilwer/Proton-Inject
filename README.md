@@ -6,6 +6,9 @@ Comprehensive DLL injector for proton games, made with Go, Rust, and Fyne with a
 </p>
 
 
+## Requirements
+The only requirement is protontricks, because we utilize `protontricks-launch` to initialize our injector inside of the correct proton prefix
+
 ## Download
 
 Download the latest release from the [release page](https://github.com/Jilwer/Proton-Inject/releases/latest).
@@ -46,11 +49,10 @@ Requirements:
 
 Run `make build` or `make release`.
 
-
-# Contributing
+## Contributing
 Feel free to submit pull requests at will, given the time I will review them and merge them when the time becomes available
 
 
-# License
+## License
 
 This code is licensed under the GNU GPL v3. Please see the [LICENSE](LICENSE) file for more details.
