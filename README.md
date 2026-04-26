@@ -24,4 +24,11 @@ Requirements:
 
 Run `make build` or `make release`.
 
+
+# Contributing
+Feel free to submit pull requests at will, given the time I will review them and merge them when the time becomes available
+
+
+# License
+
 This code is licensed under the GNU GPL v3. Please see the [LICENSE](LICENSE) file for more details.
