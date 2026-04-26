@@ -17,7 +17,7 @@ mkdir -p "$OUT_DIR" "$EMBED_DIR"
 
 echo "Building loader (release) ..."
 (cd "$LOADER_DIR" && cargo build --release --target x86_64-pc-windows-gnu)
-LOADER_DLL="$LOADER_DIR/target/x86_64-pc-windows-gnu/$CARGO_PROFILE/loader.dll"
+LOADER_DLL="$REPO_ROOT/target/x86_64-pc-windows-gnu/$CARGO_PROFILE/loader.dll"
 if [[ ! -f "$LOADER_DLL" ]]; then
 	echo "Error: loader build did not produce $LOADER_DLL" >&2
 	exit 1
