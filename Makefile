@@ -11,6 +11,9 @@ release:
 	"$(ROOT)/release.sh"
 
 clean:
-	rm -rf "$(ROOT)/build" "$(ROOT)/target" \
+	rm -rf "$(ROOT)/build" \
+		"$(ROOT)/target" \
+		"$(ROOT)/embedded/assets"/* \
 		"$(ROOT)/embedded/loader/target" \
+		"$(ROOT)/embedded/injector/target" \
 		"$(ROOT)/embedded/injector/injector_exe/target"
