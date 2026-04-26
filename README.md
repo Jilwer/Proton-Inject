@@ -13,7 +13,7 @@
 - The tool ships with an optional loader DLL that the injector can use. This creates a `proton-inject-go` `mods` folder under the target Proton/Wine prefix's `Documents` directory, with GUI helpers to quickly access this folder.
 - A profiles system lets you save game profiles so you do not need to remember details such as the Steam AppID.
 - It ships as one fully portable binary, installation not required, but can be achieved manually
-- Other injection methods are not supported at the moment because CRT+LL on linux at the present is sufficiently stealthy, anmd other methods have poor compatibility through wine/proton
+- Other injection methods are not supported at the moment because CRT+LL on linux at the present is sufficiently stealthy, and other methods have poor compatibility through wine/proton
 
 
 ## Installation
