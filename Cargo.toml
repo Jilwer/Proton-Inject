@@ -1,0 +1,7 @@
+# workspace root: members resolved from here for editor tooling and `cargo build -p`.
+[workspace]
+members = [
+    "embedded/loader",
+    "embedded/injector/injector_exe",
+]
+resolver = "2"

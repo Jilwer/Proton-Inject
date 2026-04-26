@@ -1,0 +1,53 @@
+# --- build outputs ---
+/build/
+/dist/
+/out/
+
+# --- Go ---
+*.test
+*.out
+coverage.out
+coverage.html
+*.coverprofile
+vendor/
+
+# local binaries (tracked Windows payloads under embedded/assets/ are re-included below)
+*.exe
+*.dll
+!embedded/assets/injector.exe
+!embedded/assets/loader.dll
+
+# --- Rust (workspace uses repo-root target/; crates may also have legacy target/) ---
+**/target/
+
+# --- Fyne / GUI ---
+fyne_metadata_init.go
+fyne-cross/
+
+# --- logs & temp ---
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+
+# --- environment ---
+.env
+.env.*
+!.env.example
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- editors & IDEs ---
+.idea/
+.vscode/
+*.code-workspace
+
+# --- debug symbols ---
+*.pdb
+*.dSYM/
