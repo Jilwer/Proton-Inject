@@ -15,16 +15,16 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 	"github.com/ncruces/zenity"
-	"github.com/proton-inject-go/config"
-	"github.com/proton-inject-go/embedded/injector"
-	"github.com/proton-inject-go/utils"
+	"github.com/Jilwer/Proton-Inject/config"
+	"github.com/Jilwer/Proton-Inject/embedded/injector"
+	"github.com/Jilwer/Proton-Inject/utils"
 )
 
 var Version = "0.1.0"
 
 func Run() {
 	a := app.New()
-	w := a.NewWindow("Proton Inject")
+	w := a.NewWindow("Proton-Inject")
 	w.Resize(fyne.NewSize(640, 600))
 	w.CenterOnScreen()
 
@@ -362,7 +362,6 @@ func (s *appState) buildUI() fyne.CanvasObject {
 	profilesTab := s.buildProfilesTab()
 	loaderTab := s.buildLoaderTab()
 	logsTab := s.buildLogsTab()
-	aboutTab := s.buildAboutTab()
 
 	profilesItem := container.NewTabItem("Profiles", profilesTab)
 	loaderItem := container.NewTabItem("Loader", loaderTab)
@@ -371,7 +370,6 @@ func (s *appState) buildUI() fyne.CanvasObject {
 		profilesItem,
 		loaderItem,
 		container.NewTabItem("Logs", logsTab),
-		container.NewTabItem("About", aboutTab),
 	)
 	tabs.OnSelected = func(t *container.TabItem) {
 		if t == profilesItem {
@@ -632,22 +630,6 @@ func (s *appState) refreshLoaderMods() {
 	if s.loaderList != nil {
 		s.loaderList.Refresh()
 	}
-}
-
-func (s *appState) buildAboutTab() fyne.CanvasObject {
-	about := widget.NewLabel(
-		"Proton Inject\n\n" +
-			"Automated DLL injection for Proton games via protontricks-launch.\n\n" +
-			"No DLL path: Uses embedded loader with mods from Documents/proton-inject-mods\n" +
-			"DLL path set: Injects that DLL directly\n" +
-			"Save and load injection profiles\n" +
-			"Rust-based DLL injector built in, no external downloads needed\n" +
-			"Waits for game process before injecting\n\n" +
-			"Version: " + Version + "\n" +
-			"Built with Go and Fyne",
-	)
-	about.Wrapping = fyne.TextWrapWord
-	return container.NewScroll(container.NewPadded(about))
 }
 
 func deref(s *string) string {

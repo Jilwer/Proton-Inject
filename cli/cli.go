@@ -6,9 +6,9 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/proton-inject-go/config"
-	"github.com/proton-inject-go/embedded/injector"
-	"github.com/proton-inject-go/utils"
+	"github.com/Jilwer/Proton-Inject/config"
+	"github.com/Jilwer/Proton-Inject/embedded/injector"
+	"github.com/Jilwer/Proton-Inject/utils"
 )
 
 func Run() error {

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/proton-inject-go/embedded"
-	"github.com/proton-inject-go/utils"
+	"github.com/Jilwer/Proton-Inject/embedded"
+	"github.com/Jilwer/Proton-Inject/utils"
 )
 
 func randName(ext string) string {
