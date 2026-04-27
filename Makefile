@@ -1,14 +1,18 @@
 ROOT := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+ARGS ?=
 
-.PHONY: all build release clean
+.PHONY: all build run release clean
 
 all: build
 
 build:
-	"$(ROOT)/build.sh"
+	"$(ROOT)/scripts/build.sh"
+
+run: build
+	"$(ROOT)/build/proton-inject" $(ARGS)
 
 release:
-	"$(ROOT)/release.sh"
+	"$(ROOT)/scripts/release.sh"
 
 clean:
 	rm -rf "$(ROOT)/build" \
