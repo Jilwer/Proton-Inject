@@ -13,11 +13,12 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	"github.com/ncruces/zenity"
 	"github.com/Jilwer/Proton-Inject/config"
 	"github.com/Jilwer/Proton-Inject/embedded/injector"
 	"github.com/Jilwer/Proton-Inject/utils"
+	"github.com/ncruces/zenity"
 )
 
 var Version = "0.1.0"
@@ -363,13 +364,13 @@ func (s *appState) buildUI() fyne.CanvasObject {
 	loaderTab := s.buildLoaderTab()
 	logsTab := s.buildLogsTab()
 
-	profilesItem := container.NewTabItem("Profiles", profilesTab)
-	loaderItem := container.NewTabItem("Loader", loaderTab)
+	profilesItem := container.NewTabItemWithIcon("Profiles", theme.AccountIcon(), profilesTab)
+	loaderItem := container.NewTabItemWithIcon("Loader", theme.FolderOpenIcon(), loaderTab)
 	tabs := container.NewAppTabs(
-		container.NewTabItem("Inject", injectTab),
+		container.NewTabItemWithIcon("Inject", theme.LoginIcon(), injectTab),
 		profilesItem,
 		loaderItem,
-		container.NewTabItem("Logs", logsTab),
+		container.NewTabItemWithIcon("Logs", theme.DocumentIcon(), logsTab),
 	)
 	tabs.OnSelected = func(t *container.TabItem) {
 		if t == profilesItem {
