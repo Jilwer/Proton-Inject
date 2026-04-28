@@ -1,14 +1,12 @@
 # Proton Inject
 Comprehensive DLL injector for proton games, made with Go, Rust, and Fyne with a clean GUI, profile system, and mod loader.
 
-<p align="center">
-  <img width="800" height="776" alt="Screenshot_20260426_181132" src="https://github.com/user-attachments/assets/f610966b-23a6-4c3c-9985-39847ab490ef" />
-</p>
-
+<img width="800" height="776" alt="Screenshot_20260427_212141" src="https://github.com/user-attachments/assets/bf08358f-2737-4d78-974e-eabdc86c9e3b" />
 
 ## Requirements
 - protontricks (Required for launching the injector inside the correct Proton prefix using `protontricks-launch`)
 ## Download
+
 
 Download the latest release from the [release page](https://github.com/Jilwer/Proton-Inject/releases/latest).
 
