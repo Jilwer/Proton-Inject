@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -12,21 +13,28 @@ import (
 	"github.com/Jilwer/Proton-Inject/utils"
 )
 
+func (s *appState) rebuildLoaderModsView() {
+	s.loaderModsBox.Objects = nil
+	if len(s.loaderMods) == 0 {
+		s.loaderModsBox.Add(widget.NewLabel("(no DLL files found)"))
+	} else {
+		for _, mod := range s.loaderMods {
+			s.loaderModsBox.Add(widget.NewLabel(mod))
+		}
+	}
+	s.loaderModsBox.Refresh()
+	if s.loaderModsScroll != nil {
+		s.loaderModsScroll.Refresh()
+	}
+}
+
 func (s *appState) buildLoaderTab() fyne.CanvasObject {
-
-
 	s.loaderPathLabel = widget.NewLabel("Set AppID in the Inject tab, then click Refresh.")
 	s.loaderPathLabel.Wrapping = fyne.TextWrapWord
 
-	s.loaderList = widget.NewList(
-		func() int { return len(s.loaderMods) },
-		func() fyne.CanvasObject { return widget.NewLabel("mod.dll") },
-		func(id widget.ListItemID, o fyne.CanvasObject) {
-			if id < len(s.loaderMods) {
-				o.(*widget.Label).SetText(s.loaderMods[id])
-			}
-		},
-	)
+	s.loaderModsBox = container.NewVBox()
+	s.loaderModsScroll = container.NewScroll(s.loaderModsBox)
+	s.rebuildLoaderModsView()
 
 	openBtn := widget.NewButton("Open mods directory", func() {
 		appID := strings.TrimSpace(s.appIDEntry.Text)
@@ -54,12 +62,13 @@ func (s *appState) buildLoaderTab() fyne.CanvasObject {
 	pathCard := widget.NewCard("Mods directory", "",
 		container.NewPadded(container.NewVBox(pathCardDesc, s.loaderPathLabel, container.NewHBox(openBtn, refreshBtn))))
 	modsCard := widget.NewCard("DLL files in mods directory", "Mods the loader will load (or has loaded) from the folder above.",
-		container.NewPadded(s.loaderList))
+		container.NewPadded(container.NewMax(s.loaderModsScroll)))
 
-	return container.NewScroll(container.NewPadded(container.NewVBox(
-		pathCard,
-		modsCard,
-	)))
+	return container.NewBorder(
+		container.NewPadded(pathCard),
+		nil, nil, nil,
+		container.NewPadded(container.NewMax(modsCard)),
+	)
 }
 
 func (s *appState) refreshLoaderMods() {
@@ -67,9 +76,7 @@ func (s *appState) refreshLoaderMods() {
 	if appID == "" {
 		s.loaderPathLabel.SetText("Set AppID in the Inject tab, then click Refresh.")
 		s.loaderMods = nil
-		if s.loaderList != nil {
-			s.loaderList.Refresh()
-		}
+		s.rebuildLoaderModsView()
 		return
 	}
 	modsDir := utils.ModsDirForAppID(appID)
@@ -86,9 +93,8 @@ func (s *appState) refreshLoaderMods() {
 					s.loaderMods = append(s.loaderMods, e.Name())
 				}
 			}
+			sort.Strings(s.loaderMods)
 		}
 	}
-	if s.loaderList != nil {
-		s.loaderList.Refresh()
-	}
+	s.rebuildLoaderModsView()
 }

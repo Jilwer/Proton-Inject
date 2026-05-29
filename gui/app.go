@@ -29,9 +29,10 @@ type appState struct {
 	logText     *widget.Entry
 	statusLabel *widget.Label
 
-	loaderMods      []string
-	loaderList      *widget.List
-	loaderPathLabel *widget.Label
+	loaderMods         []string
+	loaderModsBox      *fyne.Container
+	loaderModsScroll   *container.Scroll
+	loaderPathLabel    *widget.Label
 
 	profiles          []string
 	selectedProfile   string
