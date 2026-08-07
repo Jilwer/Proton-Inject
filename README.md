@@ -39,7 +39,7 @@ In testing, CRT + LoadLibrary has been sufficiently stealthy under Proton/Wine. 
 `<Proton Prefix>/drive_c/users/steamuser/Documents/proton-inject-mods`
 
 ### Do I need to install it?
-No. It’s fully portable—just run the binary.
+No. It’s fully portable, just run the binary.
 
 ## Building
 
