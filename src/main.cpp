@@ -1,6 +1,5 @@
 #include "cli/cli.hpp"
 #include "gui/application.hpp"
-#include "version.hpp"
 
 #include <iostream>
 #include <string_view>
