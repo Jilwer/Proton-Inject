@@ -83,7 +83,3 @@ Treat any committed code as your own, review it, and make sure you have an under
 ## License
 
 This code is licensed under the GNU GPL v3. Please see the [LICENSE](LICENSE) file for more details.
-
----
-
-<sub><b>AI Disclosure:</b> This project was originally an amalgamation of handwritten Go (Fyne GUI) and Rust. After a personal decision that this stack was unintuitive, overengineered, and extremely bloated (20MB binary vs 3MB binary), Claude Opus 5 was used for the initial port to C++ 23 and Qt 6. Afterwards, a thorough manual review was carried out, and code style and quality standards were enforced.</sub>
