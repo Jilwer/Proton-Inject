@@ -1,61 +1,89 @@
 # Proton Inject
-Comprehensive DLL injector for proton games, made with Go, Rust, and Fyne with a clean GUI, profile system, and mod loader.
 
-<img width="800" height="776" alt="Screenshot_20260427_212141" src="https://github.com/user-attachments/assets/bf08358f-2737-4d78-974e-eabdc86c9e3b" />
+DLL injector for Proton games, built with C++ and Qt 6.
+
+
+<img width="650" height="750" alt="Screenshot_20260809_203348" src="https://github.com/user-attachments/assets/9b714f62-13d1-4640-abaa-6ed678683f7f" />
 
 ## Requirements
-- protontricks (Required for launching the injector inside the correct Proton prefix using `protontricks-launch`)
+- Steam and Proton for Steam games
+- [umu-run](https://github.com/Open-Wine-Components/umu-launcher) for non-Steam games
+
 ## Download
-
-
 Download the latest release from the [release page](https://github.com/Jilwer/Proton-Inject/releases/latest).
 
 ## Architecture & Features
 
-- This program is primarily written in Go and Rust and uses the Fyne GUI library.
-- Both the injector and loader are embedded directly into the main program using Go's `embed.FS`.
-- The GUI wraps an embedded CRT+LL injector written in Rust, which is used to inject our DLLs.
-- We have a frontend wrapper for the injector, `injector_wrap.go`, that is built directly into the main program. This uses `protontricks-launch` to run the injector in the correct Proton context, ensuring DLL injection into the correct target process.
-- The tool ships with an optional loader DLL that the injector can use. This creates a `proton-inject-mods` folder under the target Proton/Wine prefix's `Documents` directory, with GUI helpers to quickly access this folder.
-- A profiles system lets you save game profiles so you do not need to remember details such as the Steam AppID.
-- It ships as one fully portable binary, installation not required, but can be achieved manually
-- Other injection methods are not supported at the moment because CRT+LL on linux at the present is sufficiently stealthy, and other methods have poor compatibility through wine/proton
+- C++ Qt 6 Widgets GUI that follows the system theme, with a shared CLI injection core
+- MinGW injector and loader embedded in the Linux binary
+- Steam games run via `proton runinprefix`
+- Non-Steam games run via umu-run
+- Optional loader DLL with a mods folder under the prefix Documents directory
+- Profiles for saving AppIDs and settings
+- Portable single binary
 
+## Injection Methods
+
+| Method | Function | Stealth | Compatibility |
+|--------|----------|---------|---------------|
+| `crt` | CreateRemoteThread | Low | Highest |
+| `apc` | QueueUserAPC | Medium | High |
+| `nt` | NtCreateThreadEx | High | High |
 
 ## Installation
-Either download the compiled binary from the release page, or build yourself. I will not be maintaining this on any package repo's, and system installation lies upon the user if it is wanted.
+Download a release binary or build from source. Not packaged for distro repos.
 
 ## F.A.Q
-### Why CRT+LL only?
-CRT + LoadLibrary (CreateRemoteThread + LoadLibrary) is currently the most reliable injection method under Proton/Wine.
+### Which injection method should I use?
+Start with `crt`. It has the best Proton/Wine compatibility. See the table above for a quick comparison.
 
-Other techniques tend to:
-- Break due to Wine translation layers
-- Have inconsistent compatibility across games
-
-In testing, CRT + LoadLibrary has been sufficiently stealthy under Proton/Wine. This differs from native Windows behavior. Additional methods may be added in the future if needed.
+`apc` and `nt` are also available if needed.
 
 ### Where are mods stored?
 `<Proton Prefix>/drive_c/users/steamuser/Documents/proton-inject-mods`
 
 ### Do I need to install it?
-No. It’s fully portable, just run the binary.
+No. It is fully portable, just run the binary.
 
 ## Building
 
 Requirements:
 
-- A C compiler (Fyne uses cgo)
-- Go
-- Rust
-- Make
+- CMake 3.25+ and Ninja
+- C++23 compiler (GCC 13+ or Clang 17+)
+- Qt 6 Widgets (`qt6-base-dev` on Debian/Ubuntu)
+- MinGW-w64 (`x86_64-w64-mingw32-g++`) and `objcopy`
 
-Run `make build` or `make release`.
+```bash
+cmake --preset release
+cmake --build --preset release -j"$(nproc)"
+```
+
+Output: `build/proton-inject`
+
+Optional: `just build`, `just release`, `just run`
+
+## Third-party
+
+Vendored under `third_party/`:
+
+- [CLI11](https://github.com/CLIUtils/CLI11) 2.4.2 (BSD-3-Clause) for CLI argument parsing
+- [nlohmann/json](https://github.com/nlohmann/json) 3.11.3 (MIT) for profile config serialization
+
+## Thanks
+- [proton-injector](https://github.com/jokelbaf/proton-injector) (MIT) for reference material on apc and nt injection methods
 
 ## Contributing
 Feel free to submit pull requests at will, given the time I will review them and merge them when the time becomes available
 
+## AI Contributions
+This codebase is NOT anti-llm, however, please do not submit any monolithic AI generated pull requests that are unreasonable to review as they will be ignored.
+Treat any committed code as your own, review it, and make sure you have an understanding of its functionality before submitting any pull requests.
 
 ## License
 
 This code is licensed under the GNU GPL v3. Please see the [LICENSE](LICENSE) file for more details.
+
+---
+
+<sub><b>AI Disclosure:</b> This project was originally an amalgamation of handwritten Go (Fyne GUI) and Rust. After a personal decision that this stack was unintuitive, overengineered, and extremely bloated (20MB binary vs 3MB binary), Claude Opus 5 was used for the initial port to C++ 23 and GTK4. Afterwards, a thorough manual review was carried out, and code style and quality standards were enforced.</sub>

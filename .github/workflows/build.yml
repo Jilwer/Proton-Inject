@@ -21,22 +21,14 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y mingw-w64 make pkg-config \
-            libgl1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev libx11-dev xorg-dev
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-gnu
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
+          sudo apt-get install -y \
+            cmake ninja-build mingw-w64 \
+            qt6-base-dev
 
       - name: Build (release)
-        run: make release
+        run: |
+          cmake --preset release
+          cmake --build --preset release -j"$(nproc)"
 
       - name: Create release package
         run: |

@@ -1,30 +1,19 @@
-# --- build outputs ---
+# Build outputs
 /build/
 /dist/
 /out/
+/CMakeFiles/
 
-# --- Go ---
-*.test
-*.out
-coverage.out
-coverage.html
-*.coverprofile
-vendor/
+# Embedded PE staging (generated during build)
+/build/generated/
 
-# local binaries (tracked Windows payloads under embedded/assets/ are re-included below)
-*.exe
-*.dll
-!embedded/assets/injector.exe
-!embedded/assets/loader.dll
+# IDE and tooling
+.idea/
+.vscode/
+*.code-workspace
+.cache/
 
-# --- Rust (workspace uses repo-root target/; crates may also have legacy target/) ---
-**/target/
-
-# --- Fyne / GUI ---
-fyne_metadata_init.go
-fyne-cross/
-
-# --- logs & temp ---
+# Logs and temp
 *.log
 *.tmp
 *.temp
@@ -33,23 +22,16 @@ fyne-cross/
 *.swo
 *~
 
-# --- environment ---
+# Environment
 .env
 .env.*
 !.env.example
 
-# --- OS ---
+# OS
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# --- editors & IDEs ---
-.idea/
-.vscode/
-*.code-workspace
-
-# --- debug symbols ---
+# Debug symbols
 *.pdb
 *.dSYM/
-embedded/assets/injector.exe
-embedded/assets/loader.dll

@@ -1,0 +1,15 @@
+BasedOnStyle: Google
+# clang-format has no c++23 enum; Latest tracks the newest standard it knows.
+Standard: Latest
+ColumnLimit: 100
+IndentWidth: 4
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+BreakBeforeBraces: Attach
+DerivePointerAlignment: false
+PointerAlignment: Left
+SeparateDefinitionBlocks: Always
+SortIncludes: false
+SpaceAfterTemplateKeyword: false
