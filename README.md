@@ -3,7 +3,7 @@
 DLL injector for Proton games, built with C++ and Qt 6.
 
 
-<img width="650" height="750" alt="Screenshot_20260809_203348" src="https://github.com/user-attachments/assets/9b714f62-13d1-4640-abaa-6ed678683f7f" />
+<img width="630" height="743" alt="Screenshot_20260809_220312" src="https://github.com/user-attachments/assets/22da1829-7703-424f-8c3a-c8bde8715bf9" />
 
 ## Requirements
 - Steam and Proton for Steam games
