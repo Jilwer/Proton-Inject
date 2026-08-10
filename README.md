@@ -51,7 +51,7 @@ Requirements:
 
 - CMake 3.25+ and Ninja
 - C++23 compiler (GCC 13+ or Clang 17+)
-- Qt 6 Widgets (`qt6-base-dev` on Debian/Ubuntu)
+- Qt 6.2+ Widgets (`qt6-base-dev` on Debian/Ubuntu)
 - MinGW-w64 (`x86_64-w64-mingw32-g++`) and `objcopy`
 
 ```bash
@@ -86,4 +86,4 @@ This code is licensed under the GNU GPL v3. Please see the [LICENSE](LICENSE) fi
 
 ---
 
-<sub><b>AI Disclosure:</b> This project was originally an amalgamation of handwritten Go (Fyne GUI) and Rust. After a personal decision that this stack was unintuitive, overengineered, and extremely bloated (20MB binary vs 3MB binary), Claude Opus 5 was used for the initial port to C++ 23 and GTK4. Afterwards, a thorough manual review was carried out, and code style and quality standards were enforced.</sub>
+<sub><b>AI Disclosure:</b> This project was originally an amalgamation of handwritten Go (Fyne GUI) and Rust. After a personal decision that this stack was unintuitive, overengineered, and extremely bloated (20MB binary vs 3MB binary), Claude Opus 5 was used for the initial port to C++ 23 and Qt 6. Afterwards, a thorough manual review was carried out, and code style and quality standards were enforced.</sub>
