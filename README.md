@@ -9,8 +9,26 @@ DLL injector for Proton games, built with C++ and Qt 6.
 - Steam and Proton for Steam games
 - [umu-run](https://github.com/Open-Wine-Components/umu-launcher) for non-Steam games
 
-## Download
-Download the latest release from the [release page](https://github.com/Jilwer/Proton-Inject/releases/latest).
+## Installation and Download
+[Download](https://github.com/Jilwer/Proton-Inject/releases/latest) the latest release or build from source. Not packaged for distro repos.
+
+The binary is portable, but it can install itself for a menu entry:
+
+```bash
+./proton-inject --install
+```
+
+It copies itself to `~/.local/bin`, installs its icons, and writes
+`~/.local/share/applications/proton-inject.desktop`. Everything lands under `$HOME`, so no root
+is involved. To reverse it:
+
+```bash
+proton-inject --uninstall
+```
+
+Profiles and settings are left in place.
+
+
 
 ## Architecture & Features
 
@@ -31,24 +49,7 @@ Download the latest release from the [release page](https://github.com/Jilwer/Pr
 | `apc` | QueueUserAPC | Medium | High |
 | `nt` | NtCreateThreadEx | High | High |
 
-## Installation
-Download a release binary or build from source. Not packaged for distro repos.
 
-The binary is portable, but it can install itself for a menu entry:
-
-```bash
-./proton-inject --install
-```
-
-It copies itself to `~/.local/bin`, installs its icons, and writes
-`~/.local/share/applications/proton-inject.desktop`. Everything lands under `$HOME`, so no root
-is involved. To reverse it:
-
-```bash
-proton-inject --uninstall
-```
-
-Profiles and settings are left in place.
 
 ## F.A.Q
 ### Which injection method should I use?
