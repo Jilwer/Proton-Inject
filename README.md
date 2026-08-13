@@ -36,7 +36,7 @@ Profiles and settings are left in place.
 - MinGW injector and loader embedded in the Linux binary
 - Both Steam and non-Steam games attach to an already-running game process — launch the game first, then inject
 - Steam games: the injector runs inside the game's Proton prefix via `proton runinprefix`
-- Non-Steam games: the injector runs in the same prefix via `umu-run` (set `--proton-path`/`PROTONPATH` and, optionally, `--wine-prefix`)
+- Non-Steam games: the injector runs in the same prefix via `umu-run` 
 - Optional loader DLL with a mods folder under the prefix Documents directory
 - Mods added and removed from the Loader tab
 - Profiles for saving AppIDs and settings
