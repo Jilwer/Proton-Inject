@@ -12,7 +12,7 @@ DLL injector for Proton games, built with C++ and Qt 6.
 ## Installation & Download
 [Download](https://github.com/Jilwer/Proton-Inject/releases/latest) the latest release or build from source. Not packaged for distro repos.
 
-The binary is portable, but it can install itself for a menu entry:
+The binary is portable and installation is **not** required, but it can install itself for a menu entry:
 
 ```bash
 ./proton-inject --install
