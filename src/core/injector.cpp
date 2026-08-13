@@ -208,7 +208,7 @@ std::string describe_exit_status(int status) {
     return "status " + std::to_string(status);
 }
 
-// Randomize the staged loader's filename so it does not present the same signature on disk or in
+// randomize the staged loader's filename so it does not present the same signature on disk or in
 // the module list on every injection. The loader locates loader.cfg relative to its own module
 // path, so the name itself carries no meaning.
 std::string random_loader_name() {
@@ -498,7 +498,7 @@ std::vector<std::string> build_injector_args(const InjectOptions& options,
     const auto dll_arg = injector_dll_argument(target_dll, staged_basenames);
     std::vector<std::string> args;
 
-    // Both Steam and non-Steam attach to an already-running game process.
+    // both Steam and non-Steam attach to an already-running game process.
     args.push_back("-n");
     args.push_back(exe_name(options.target_exe));
     args.push_back("-i");

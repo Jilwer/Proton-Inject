@@ -42,6 +42,7 @@ private:
     QWidget* build_profiles_page();
     QWidget* build_loader_page();
     QWidget* build_logs_page();
+    QWidget* build_about_page();
 
     void setup_ui();
     void size_to_content();

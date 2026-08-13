@@ -249,9 +249,22 @@ std::expected<void, std::string> write_bytes(const ProcMem& mem, std::uintptr_t 
     return mem.write(addr, std::span(static_cast<const std::byte*>(data), size));
 }
 
+// imports a running frame loop hits constantly, most-reliable first
+constexpr std::array<std::string_view, 6> kHotFunctions{
+    "QueryPerformanceCounter", "GetTickCount64", "PeekMessageW", "GetMessageW", "SleepEx",
+    "WaitForSingleObjectEx",
+};
+
+// at or above this score the module is a known engine, not a generic exe/dll
+constexpr int kEngineFloor = 80;
+
 int module_preference(std::string_view path) {
     const auto base = path_ends_with_ignore_case(path, "unityplayer.dll")    ? 100
-                      : path_ends_with_ignore_case(path, "gameassembly.dll") ? 90
+                      : path_ends_with_ignore_case(path, "gameassembly.dll") ? 90   // Unity IL2CPP
+                      : path_ends_with_ignore_case(path, "engine2.dll")      ? 85   // Source 2
+                      : path_ends_with_ignore_case(path, "engine.dll")       ? 85   // Source 1
+                      : path_ends_with_ignore_case(path, "crysystem.dll")    ? 85   // CryEngine
+                      : path_ends_with_ignore_case(path, "tier0.dll")        ? 80   // Source runtime
                       : path_ends_with_ignore_case(path, ".exe")             ? 50
                       : path_ends_with_ignore_case(path, "kernel32.dll")     ? 0
                       : path_ends_with_ignore_case(path, "ntdll.dll")        ? 0
@@ -261,36 +274,95 @@ int module_preference(std::string_view path) {
     return base;
 }
 
+bool is_named_engine(std::string_view path) { return module_preference(path) >= kEngineFloor; }
+
+// engine and game images are large, launcher stubs and helper dlls small, so
+// total size is evidence of which module carries the frame loop
+std::size_t image_size(const std::vector<Mapping>& maps, std::string_view path) {
+    std::size_t total = 0;
+    for (const auto& mapping : maps) {
+        if (mapping.path == path) {
+            total += mapping.size();
+        }
+    }
+    return total;
+}
+
+struct IatCandidate {
+    IatHook hook;
+    int hot_count = 0;
+    int name_pref = 0;
+    std::size_t size = 0;
+    bool named_engine = false;
+};
+
+std::optional<IatCandidate> probe_image(const ProcMem& mem, const std::vector<Mapping>& maps,
+                                        const Mapping& image) {
+    std::optional<IatHook> chosen;
+    int hot_count = 0;
+    for (const auto function : kHotFunctions) {
+        auto slot = find_iat_slot(mem, image.start, {}, function);
+        if (!slot) {
+            continue;
+        }
+        ++hot_count;
+        if (!chosen) {
+            IatHook hook;
+            hook.iat = *slot;
+            hook.owner = image.path;
+            hook.function = std::string(function);
+            chosen = std::move(hook);
+        }
+    }
+    if (!chosen) {
+        return std::nullopt;
+    }
+    IatCandidate candidate;
+    candidate.hook = std::move(*chosen);
+    candidate.hot_count = hot_count;
+    candidate.name_pref = module_preference(image.path);
+    candidate.size = image_size(maps, image.path);
+    candidate.named_engine = is_named_engine(image.path);
+    return candidate;
+}
+
 std::optional<IatHook> find_process_iat(const ProcMem& mem, const std::vector<Mapping>& maps) {
-    std::vector<const Mapping*> images;
+    std::vector<IatCandidate> candidates;
     for (const auto& mapping : maps) {
         if (mapping.offset != 0 || module_preference(mapping.path) <= 0) {
             continue;
         }
-        images.push_back(&mapping);
-    }
-    std::sort(images.begin(), images.end(), [](const Mapping* left, const Mapping* right) {
-        return module_preference(left->path) > module_preference(right->path);
-    });
-
-    static constexpr std::array<std::string_view, 6> kFunctions{
-        "QueryPerformanceCounter", "GetTickCount64", "PeekMessageW", "GetMessageW", "SleepEx",
-        "WaitForSingleObjectEx",
-    };
-    for (const auto function : kFunctions) {
-        for (const Mapping* image : images) {
-            auto slot = find_iat_slot(mem, image->start, {}, function);
-            if (!slot) {
-                continue;
-            }
-            IatHook hook;
-            hook.iat = *slot;
-            hook.owner = image->path;
-            hook.function = std::string(function);
-            return hook;
+        if (auto candidate = probe_image(mem, maps, mapping); candidate) {
+            candidates.push_back(std::move(*candidate));
         }
     }
-    return std::nullopt;
+    if (candidates.empty()) {
+        return std::nullopt;
+    }
+
+    std::sort(candidates.begin(), candidates.end(),
+              [](const IatCandidate& left, const IatCandidate& right) {
+                  // a named engine is authoritative and beats any generic exe/dll
+                  if (left.named_engine != right.named_engine) {
+                      return left.named_engine;
+                  }
+                  if (left.named_engine && left.name_pref != right.name_pref) {
+                      return left.name_pref > right.name_pref;
+                  }
+                  // unknown engines: most hot imports, then biggest image, then
+                  // exe over dll, then address so the pick is deterministic
+                  if (left.hot_count != right.hot_count) {
+                      return left.hot_count > right.hot_count;
+                  }
+                  if (left.size != right.size) {
+                      return left.size > right.size;
+                  }
+                  if (left.name_pref != right.name_pref) {
+                      return left.name_pref > right.name_pref;
+                  }
+                  return left.hook.iat.slot < right.hook.iat.slot;
+              });
+    return candidates.front().hook;
 }
 
 }  // namespace

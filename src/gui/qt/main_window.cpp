@@ -8,9 +8,11 @@
 #include "core/console_mode.hpp"
 #include "core/method.hpp"
 #include "proton/proton.hpp"
+#include "version.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QFrame>
 #include <QGuiApplication>
 #include <QLabel>
 #include <QLineEdit>
@@ -166,6 +168,8 @@ void MainWindow::setup_ui() {
                    QStringLiteral("Loader"));
     m_tabs->addTab(build_logs_page(), QIcon::fromTheme(QStringLiteral("text-x-generic")),
                    QStringLiteral("Logs"));
+    m_tabs->addTab(build_about_page(), QIcon::fromTheme(QStringLiteral("help-about")),
+                   QStringLiteral("About"));
     connect(m_tabs, &QTabWidget::currentChanged, this, &MainWindow::on_tab_changed);
 
     setCentralWidget(m_tabs);
@@ -577,6 +581,53 @@ QWidget* MainWindow::build_logs_page() {
     return page;
 }
 
+QWidget* MainWindow::build_about_page() {
+    auto* page = form::make_page();
+    auto* layout = form::page_layout(page);
+
+    layout->addWidget(form::make_heading(QStringLiteral("Proton Inject")));
+
+    auto* version = new QLabel(
+        QStringLiteral("Version %1").arg(QString::fromLatin1(proton_inject::kVersion)));
+    version->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    layout->addWidget(version);
+
+    auto* summary =
+        new QLabel(QStringLiteral("DLL injector for Proton games, built with C++ and Qt 6."));
+    summary->setWordWrap(true);
+    layout->addWidget(summary);
+
+    // rich-text labels so the project, license, and credit links stay clickable
+    auto* project = new QLabel(QStringLiteral(
+        "<a href=\"https://github.com/Jilwer/Proton-Inject\">github.com/Jilwer/Proton-Inject</a>"));
+    project->setOpenExternalLinks(true);
+    project->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    layout->addWidget(project);
+
+    auto* license = new QLabel(QStringLiteral(
+        "Licensed under the <a href=\"https://www.gnu.org/licenses/gpl-3.0.html\">GNU GPLv3</a>."));
+    license->setOpenExternalLinks(true);
+    license->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    layout->addWidget(license);
+
+    auto* rule = new QFrame;
+    rule->setFrameShape(QFrame::HLine);
+    rule->setFrameShadow(QFrame::Sunken);
+    layout->addWidget(rule);
+
+    layout->addWidget(form::make_heading(QStringLiteral("Third-party libraries")));
+
+    auto* credits = new QLabel(QStringLiteral(
+        "<a href=\"https://github.com/CLIUtils/CLI11\">CLI11</a> (BSD-3-Clause)<br>"
+        "<a href=\"https://github.com/nlohmann/json\">nlohmann/json</a> (MIT)"));
+    credits->setOpenExternalLinks(true);
+    credits->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    layout->addWidget(credits);
+
+    layout->addStretch(1);
+    return page;
+}
+
 void MainWindow::refresh_profiles() {
     const std::vector<std::string> profiles = m_profiles.list_profiles();
     const QString previous = m_profile_combo->currentText();
@@ -700,7 +751,7 @@ InjectionConfig MainWindow::collect_config() const {
 
 std::expected<void, std::string> MainWindow::validate_config() const {
     const InjectionConfig config = collect_config();
-    // Both modes attach to an already-running game; they differ only in the launcher backend
+    // both modes attach to an already-running game; they differ only in the launcher backend
     // (Steam's runinprefix vs umu-run) and where the prefix comes from.
     const bool steam = config.mode == InjectionMode::Steam;
 
