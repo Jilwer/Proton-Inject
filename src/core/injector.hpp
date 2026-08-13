@@ -19,6 +19,8 @@ private:
     [[nodiscard]] std::expected<void, std::string> run_umu(
         const InjectOptions& options, const std::string& stage_dir,
         const std::string& local_injector, const std::vector<std::string>& injector_args) const;
+    [[nodiscard]] std::expected<void, std::string> run_iat(const InjectOptions& options,
+                                                           const std::string& target_dll) const;
     [[nodiscard]] bool wait_for_process(const std::string& process_name, int timeout_seconds) const;
     [[nodiscard]] bool is_process_running(const std::string& process_name) const;
 };

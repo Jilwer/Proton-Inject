@@ -3,6 +3,8 @@
 #include "core/console_mode.hpp"
 #include "core/embedded_assets.hpp"
 #include "core/method.hpp"
+#include "native/inject_mem.hpp"
+#include "native/process.hpp"
 #include "proton/proton.hpp"
 #include "utils/utils.hpp"
 
@@ -17,6 +19,7 @@
 #include <regex>
 #include <sstream>
 #include <string_view>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
@@ -546,16 +549,6 @@ std::expected<void, std::string> Injector::inject_with(const InjectOptions& opti
         }
     } guard{stage_path};
 
-    const auto local_injector = stage_path / "injector.exe";
-    if (const auto err = write_embedded_file(
-            local_injector, embedded::injector_exe, embedded::injector_exe_size,
-            fs::perms::owner_all | fs::perms::group_read | fs::perms::others_read);
-        !err) {
-        return err;
-    }
-    debug("Staged injector at " + local_injector.string() + " (" +
-          std::to_string(embedded::injector_exe_size) + " bytes)");
-
     std::string target_dll = resolved.dll_path;
     if (resolved.use_loader) {
         target_dll = (stage_path / random_loader_name()).string();
@@ -580,6 +573,20 @@ std::expected<void, std::string> Injector::inject_with(const InjectOptions& opti
         }
     }
 
+    if (is_linux_iat_method(resolved.method)) {
+        return run_iat(resolved, target_dll);
+    }
+
+    const auto local_injector = stage_path / "injector.exe";
+    if (const auto err = write_embedded_file(
+            local_injector, embedded::injector_exe, embedded::injector_exe_size,
+            fs::perms::owner_all | fs::perms::group_read | fs::perms::others_read);
+        !err) {
+        return err;
+    }
+    debug("Staged injector at " + local_injector.string() + " (" +
+          std::to_string(embedded::injector_exe_size) + " bytes)");
+
     // Steam runs the injector inside the prefix via runinprefix with the stage dir as CWD, so
     // basenames resolve; umu-run needs absolute Z:\ paths instead.
     const bool use_staged_basenames = !resolved.non_steam;
@@ -588,6 +595,40 @@ std::expected<void, std::string> Injector::inject_with(const InjectOptions& opti
         return run_umu(resolved, stage_path.string(), local_injector.string(), injector_args);
     }
     return run_steam(resolved, stage_path.string(), local_injector.string(), injector_args);
+}
+
+std::expected<void, std::string> Injector::run_iat(const InjectOptions& options,
+                                                   const std::string& target_dll) const {
+    debug("Waiting for game process to be ready...");
+    if (!wait_for_process(exe_name(options.target_exe), 30)) {
+        return std::unexpected("Game process not ready: process " + exe_name(options.target_exe) +
+                               " not found within 30s");
+    }
+    debug("Game process is ready");
+
+    if (options.sleep_ms > 0) {
+        debug("Sleeping " + std::to_string(options.sleep_ms) + " ms before " + options.method +
+              " injection");
+        std::this_thread::sleep_for(std::chrono::milliseconds(options.sleep_ms));
+    }
+
+    std::string last_error = "kernel32.dll is not mapped yet";
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+    pid_t pid = -1;
+    while (std::chrono::steady_clock::now() < deadline) {
+        auto found = find_wine_target_pid(options.target_exe);
+        if (found) {
+            pid = *found;
+            break;
+        }
+        last_error = found.error();
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    if (pid < 0) {
+        return std::unexpected(last_error);
+    }
+    debug("Using pid " + std::to_string(pid) + " for " + options.method + " injection");
+    return inject_dll_via_iat(pid, target_dll);
 }
 
 std::expected<void, std::string> Injector::run_steam(

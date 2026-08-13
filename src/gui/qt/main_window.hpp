@@ -73,6 +73,7 @@ private:
     void set_status(const std::string& text);
     void show_toast(const std::string& message);
     void sync_source_state();
+    void sync_method_state();
     void sync_dll_input_state();
     void sync_loader_console_state();
     void refresh_history_combo();
@@ -80,6 +81,8 @@ private:
     void sync_game_dir_button();
     void update_resolved_proton();
     [[nodiscard]] bool is_non_steam() const;
+    [[nodiscard]] std::string selected_method() const;
+    [[nodiscard]] bool is_linux_iat_method() const;
     [[nodiscard]] std::string selected_proton_path() const;
     [[nodiscard]] std::string game_name_for(const std::string& app_id) const;
     [[nodiscard]] std::string steam_game_install_dir() const;
@@ -94,6 +97,9 @@ private:
 
     QComboBox* m_profile_combo = nullptr;
     QComboBox* m_history_combo = nullptr;
+    QLabel* m_game_heading = nullptr;
+    QLabel* m_source_caption = nullptr;
+    QWidget* m_source_row = nullptr;
     QComboBox* m_source_combo = nullptr;
     QStackedWidget* m_mode_stack = nullptr;
     QComboBox* m_game_combo = nullptr;

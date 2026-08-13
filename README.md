@@ -34,9 +34,11 @@ Profiles and settings are left in place.
 
 - C++ Qt 6 Widgets GUI that follows the system theme, with a shared CLI injection core
 - MinGW injector and loader embedded in the Linux binary
-- Both Steam and non-Steam games attach to an already-running game process — launch the game first, then inject
+- Both Steam and non-Steam games attach to an already-running game process; launch the game first, then inject
 - Steam games: the injector runs inside the game's Proton prefix via `proton runinprefix`
 - Non-Steam games: the injector runs in the same prefix via `umu-run` 
+- `liatll` skips the prefix entirely and injects from Linux by pid, so it needs no AppID, prefix or
+  Proton build; the GUI hides the whole Game group when it is selected
 - Optional loader DLL with a mods folder under the prefix Documents directory
 - Mods added and removed from the Loader tab
 - Profiles for saving AppIDs and settings
@@ -49,6 +51,7 @@ Profiles and settings are left in place.
 | `crt` | CreateRemoteThread | Low | Highest |
 | `apc` | QueueUserAPC | Medium | High |
 | `nt` | NtCreateThreadEx | High | High |
+| `liatll` | Linux IAT hook + LoadLibrary (`/proc/pid/mem`) | Highest | Needs same-uid mem access; 64-bit Proton only |
 
 
 
@@ -56,7 +59,7 @@ Profiles and settings are left in place.
 ### Which injection method should I use?
 Start with `crt`. It has the best Proton/Wine compatibility. See the table above for a quick comparison.
 
-`apc` and `nt` are also available if needed.
+`apc` and `nt` run a Windows injector inside the prefix. `liatll` (Linux IAT + LoadLibrary) hooks a game import from Linux via `/proc/pid/mem` and does not launch `injector.exe`. It needs classic same-uid access to the game process (`kernel.yama.ptrace_scope=0` on many distros); if that fails, use `crt`.
 
 ### Where are mods stored?
 `<Proton Prefix>/drive_c/users/steamuser/Documents/proton-inject-mods`

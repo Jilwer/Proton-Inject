@@ -44,8 +44,8 @@ constexpr int kDelayFieldWidth = 80;
 constexpr int kDllListHeight = 64;
 
 // the injector takes the canonical ids; only the labels say which one you get by default.
-constexpr std::array<std::pair<const char*, const char*>, 3> k_methods{
-    {{"crt", "crt (default)"}, {"apc", "apc"}, {"nt", "nt"}}};
+constexpr std::array<std::pair<const char*, const char*>, 4> k_methods{
+    {{"crt", "crt (default)"}, {"apc", "apc"}, {"nt", "nt"}, {"liatll", "liat+ll"}}};
 
 int method_index(const std::string& method) {
     const std::string canonical = proton_inject::normalize_method(method);
@@ -134,6 +134,7 @@ MainWindow::MainWindow() {
     refresh_history_combo();
     refresh_game_combo();
     sync_source_state();
+    sync_method_state();
     sync_dll_input_state();
     sync_loader_console_state();
     update_resolved_proton();
@@ -276,13 +277,14 @@ QWidget* MainWindow::build_non_steam_fields(std::vector<QLabel*>& captions) {
 }
 
 void MainWindow::add_game_group(form::Form& form, std::vector<QLabel*>& captions) {
-    form.add_group(QStringLiteral("Game"));
+    m_game_heading = form.add_group(QStringLiteral("Game"));
 
     m_source_combo = new QComboBox;
     m_source_combo->addItems({QStringLiteral("Steam"), QStringLiteral("Non-Steam (umu)")});
-    m_source_combo->setToolTip(QStringLiteral(
-        "Non-Steam attaches through umu-run; launch the game yourself first."));
-    form.add(QStringLiteral("Source"), form::make_row({m_source_combo}, false));
+    m_source_combo->setToolTip(
+        QStringLiteral("Non-Steam attaches through umu-run; launch the game yourself first."));
+    m_source_row = form::make_row({m_source_combo}, false);
+    m_source_caption = form.add(QStringLiteral("Source"), m_source_row);
 
     // Steam and non-Steam need different fields, but swapping the whole group in and out
     // loses the reader's place. A stack keeps the group and its height fixed.
@@ -317,6 +319,10 @@ void MainWindow::add_injection_group(form::Form& form) {
     for (const auto& [id, label] : k_methods) {
         m_method_combo->addItem(QString::fromLatin1(label));
     }
+    m_method_combo->setToolTip(
+        QStringLiteral("crt, apc and nt run the Windows injector inside the prefix, so they need "
+                       "the game's Steam or Proton details. liat+ll hooks a game IAT from Linux "
+                       "and calls LoadLibrary; it needs nothing but the .exe name."));
     auto* delay_label = new QLabel(QStringLiteral("Delay (ms)"));
     m_sleep_entry = make_entry(QStringLiteral("0"));
     m_sleep_entry->setFixedWidth(kDelayFieldWidth);
@@ -360,6 +366,10 @@ void MainWindow::add_injection_group(form::Form& form) {
     m_dll_fields = form::make_row({m_dll_list, dll_buttons});
     m_dll_caption = form.add(QStringLiteral("DLL files"), m_dll_fields);
 
+    connect(m_method_combo, &QComboBox::currentIndexChanged, this, [this]() {
+        sync_method_state();
+        update_action_states();
+    });
     connect(m_use_loader_check, &QCheckBox::toggled, this, [this]() {
         on_use_loader_toggled();
         update_action_states();
@@ -657,6 +667,7 @@ void MainWindow::apply_config(const InjectionConfig& config) {
     }
 
     sync_source_state();
+    sync_method_state();
     sync_dll_input_state();
     sync_loader_console_state();
     sync_game_dir_button();
@@ -674,8 +685,7 @@ InjectionConfig MainWindow::collect_config() const {
     config.loader_console = k_console_modes[static_cast<std::size_t>(std::max(
                                                 0, m_loader_console_combo->currentIndex()))]
                                 .first;
-    config.method =
-        k_methods[static_cast<std::size_t>(std::max(0, m_method_combo->currentIndex()))].first;
+    config.method = selected_method();
     config.sleep_ms = sleep_ms_value();
     config.wine_prefix = gui_util::trim(from_qt(m_prefix_entry->text()));
     config.game_id = gui_util::trim(from_qt(m_game_id_entry->text()));
@@ -698,29 +708,34 @@ std::expected<void, std::string> MainWindow::validate_config() const {
         return std::unexpected("Please enter a game executable name or path.");
     }
 
-    if (steam && config.app_id.empty()) {
-        return std::unexpected("AppID is required for Steam games (or pick Non-Steam).");
-    }
-
-    // a bare name is a process to attach to; anything else has to resolve to a real file.
-    const bool needs_real_path = !InjectRunner::is_bare_exe_name(config.exe_path);
-    if (needs_real_path && !gui_util::path_exists(config.exe_path) &&
-        InjectRunner::resolve_launch_target(config.app_id, config.exe_path).empty()) {
-        return std::unexpected("Enter a process name (e.g. Game.exe) or a valid executable path.");
-    }
-
-    if (!steam && gui_util::find_executable("umu-run").empty()) {
-        return std::unexpected("umu-run is required for non-Steam games.");
-    }
-
-    if (!InjectRunner::has_valid_proton_path(config.proton_path)) {
-        if (!steam) {
-            return std::unexpected("Please select a valid Proton installation.");
+    // Linux IAT methods find the pid from the basename alone, so the launcher-specific checks
+    // below do not apply.
+    if (!is_linux_iat_method()) {
+        if (steam && config.app_id.empty()) {
+            return std::unexpected("AppID is required for Steam games (or pick Non-Steam).");
         }
-        // the Proton row already spells out why the AppID did not resolve.
-        const std::string reason = from_qt(m_proton_label->text());
-        return std::unexpected(reason.empty() ? "Could not resolve Proton for this AppID."
-                                              : reason);
+
+        // a bare name is a process to attach to; anything else has to resolve to a real file.
+        const bool needs_real_path = !InjectRunner::is_bare_exe_name(config.exe_path);
+        if (needs_real_path && !gui_util::path_exists(config.exe_path) &&
+            InjectRunner::resolve_launch_target(config.app_id, config.exe_path).empty()) {
+            return std::unexpected(
+                "Enter a process name (e.g. Game.exe) or a valid executable path.");
+        }
+
+        if (!steam && gui_util::find_executable("umu-run").empty()) {
+            return std::unexpected("umu-run is required for non-Steam games.");
+        }
+
+        if (!InjectRunner::has_valid_proton_path(config.proton_path)) {
+            if (!steam) {
+                return std::unexpected("Please select a valid Proton installation.");
+            }
+            // the Proton row already spells out why the AppID did not resolve.
+            const std::string reason = from_qt(m_proton_label->text());
+            return std::unexpected(reason.empty() ? "Could not resolve Proton for this AppID."
+                                                  : reason);
+        }
     }
 
     if (!config.use_loader) {
@@ -918,6 +933,16 @@ bool MainWindow::is_non_steam() const {
     return m_source_combo->currentIndex() == 1;
 }
 
+std::string MainWindow::selected_method() const {
+    return k_methods[static_cast<std::size_t>(std::max(0, m_method_combo->currentIndex()))].first;
+}
+
+// Linux IAT methods attach to the game by pid and map the DLL in from Linux, so they never go
+// through Steam or Proton and need no AppID, prefix or Proton build.
+bool MainWindow::is_linux_iat_method() const {
+    return proton_inject::is_linux_iat_method(selected_method());
+}
+
 std::string MainWindow::selected_proton_path() const {
     if (is_non_steam()) {
         return gui_util::trim(from_qt(m_proton_path_entry->text()));
@@ -929,6 +954,18 @@ void MainWindow::sync_source_state() {
     m_mode_stack->setCurrentIndex(is_non_steam() ? 1 : 0);
     sync_game_dir_button();
     update_resolved_proton();
+}
+
+// the Game group only feeds the prefix-side injector, so hide it for Linux IAT methods, which
+// attach by pid and read none of it.
+void MainWindow::sync_method_state() {
+    const bool linux_iat = is_linux_iat_method();
+    m_game_heading->setVisible(!linux_iat);
+    m_source_caption->setVisible(!linux_iat);
+    m_source_row->setVisible(!linux_iat);
+    m_mode_stack->setVisible(!linux_iat);
+    m_exe_entry->setPlaceholderText(linux_iat ? QStringLiteral("Game.exe")
+                                              : QStringLiteral("Game.exe or full path"));
 }
 
 void MainWindow::on_use_loader_toggled() {

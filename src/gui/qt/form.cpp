@@ -26,13 +26,14 @@ void Form::start_rows() {
     m_layout->addLayout(m_rows);
 }
 
-void Form::add_group(const QString& title) {
+QLabel* Form::add_group(const QString& title) {
     QLabel* heading = make_heading(title);
     if (m_rows != nullptr) {
         heading->setContentsMargins(0, kLargeSpacing, 0, 0);
     }
     m_layout->addWidget(heading);
     start_rows();
+    return heading;
 }
 
 QLabel* Form::add(const QString& caption, QWidget* field) {

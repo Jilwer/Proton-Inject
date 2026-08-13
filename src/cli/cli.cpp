@@ -67,7 +67,14 @@ std::expected<InjectOptions, std::string> build_options(AppConfig& config, const
     std::string dll = config.dll_path.value_or("");
     const bool non_steam = config.non_steam.value_or(false);
 
-    if (!non_steam && app_id.empty()) {
+    std::string method = normalize_method(config.method.value_or(std::string(kMethodCrt)));
+    if (!valid_method(method)) {
+        method = std::string(kMethodCrt);
+    }
+
+    // Linux IAT methods find the game by pid and map the DLL in from Linux, so they need
+    // the exe name and nothing else: no AppID, no Proton, no prefix.
+    if (!is_linux_iat_method(method) && !non_steam && app_id.empty()) {
         return std::unexpected(
             "AppID is required for Steam games (use --appid, or --non-steam for umu-run)");
     }
@@ -105,11 +112,6 @@ std::expected<InjectOptions, std::string> build_options(AppConfig& config, const
                 return std::unexpected("DLL not found at " + expanded_dll);
             }
         }
-    }
-
-    std::string method = normalize_method(config.method.value_or(std::string(kMethodCrt)));
-    if (!valid_method(method)) {
-        method = std::string(kMethodCrt);
     }
 
     InjectOptions options;
@@ -166,7 +168,7 @@ std::expected<void, std::string> run_cli(int argc, char** argv) {
     app.add_option("--loader-console", loader_console,
                    "Loader console: alloc (new window), attach (reuse the game's existing "
                    "console, e.g. BepInEx's), none (default: alloc)");
-    app.add_option("--method", method, "Injection method: crt, apc, nt (default: crt)");
+    app.add_option("--method", method, "Injection method: crt, apc, nt, liatll (default: crt)");
     app.add_flag("--non-steam", non_steam,
                  "Non-Steam game: attach via umu-run (launch the game yourself first)");
     app.add_option("--proton-path", proton_path,
@@ -241,7 +243,7 @@ std::expected<void, std::string> run_cli(int argc, char** argv) {
     if (app.count("--method") > 0) {
         const auto normalized = normalize_method(method);
         if (!valid_method(normalized)) {
-            return std::unexpected("Invalid method \"" + method + "\" (want: crt, apc, nt)");
+            return std::unexpected("Invalid method \"" + method + "\" (want: crt, apc, nt, liatll)");
         }
         config->method = normalized;
     }

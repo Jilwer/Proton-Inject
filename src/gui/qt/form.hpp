@@ -26,8 +26,9 @@ class Form {
 public:
     explicit Form(QWidget* parent);
 
-    // increasing the gap above a heading is what separates one group from the last.
-    void add_group(const QString& title);
+    // increasing the gap above a heading is what separates one group from the last. The
+    // heading comes back so a caller that hides a whole group can hide its title with it.
+    QLabel* add_group(const QString& title);
     QLabel* add(const QString& caption, QWidget* field);
     void add_wide(QWidget* field);
 

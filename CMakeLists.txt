@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(proton-inject VERSION 1.2.0 LANGUAGES CXX)
+project(proton-inject VERSION 1.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -119,6 +119,10 @@ set(SOURCES
     src/proton/proton.cpp
     src/proton/vdf.cpp
     src/utils/utils.cpp
+    src/native/proc_mem.cpp
+    src/native/process.cpp
+    src/native/pe_export.cpp
+    src/native/inject_mem.cpp
     src/gui/application.cpp
     src/gui/app_icon.cpp
     src/gui/qt/form.cpp

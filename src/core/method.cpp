@@ -19,12 +19,23 @@ std::string normalize_method(const std::string_view method) {
     if (normalized == "nt" || normalized == "ntcreatethreadex") {
         return std::string(kMethodNt);
     }
+    if (normalized == "liatll" || normalized == "liat+ll" || normalized == "liat-ll" ||
+        normalized == "liat" || normalized == "iatll" || normalized == "iat+ll" ||
+        normalized == "iat-ll" || normalized == "iat" || normalized == "mem" ||
+        normalized == "proc_mem" || normalized == "native" || normalized == "linux") {
+        return std::string(kMethodLiatLl);
+    }
     return normalized;
 }
 
 bool valid_method(const std::string_view method) {
     const auto normalized = normalize_method(method);
-    return normalized == kMethodCrt || normalized == kMethodApc || normalized == kMethodNt;
+    return normalized == kMethodCrt || normalized == kMethodApc || normalized == kMethodNt ||
+           normalized == kMethodLiatLl;
+}
+
+bool is_linux_iat_method(const std::string_view method) {
+    return normalize_method(method) == kMethodLiatLl;
 }
 
 }  // namespace proton_inject
