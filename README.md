@@ -9,7 +9,7 @@ DLL injector for Proton games, built with C++ and Qt 6.
 - Steam and Proton for Steam games
 - [umu-run](https://github.com/Open-Wine-Components/umu-launcher) for non-Steam games
 
-## Installation and Download
+## Installation & Download
 [Download](https://github.com/Jilwer/Proton-Inject/releases/latest) the latest release or build from source. Not packaged for distro repos.
 
 The binary is portable, but it can install itself for a menu entry:
