@@ -2,9 +2,9 @@
 
 #include <windows.h>
 
-BOOL WINAPI DllMain(HINSTANCE /*instance*/, DWORD reason, LPVOID /*reserved*/) {
+BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID /*reserved*/) {
     if (reason == DLL_PROCESS_ATTACH) {
-        loader::attach();
+        loader::attach(instance);
     } else if (reason == DLL_PROCESS_DETACH) {
         loader::detach();
     }

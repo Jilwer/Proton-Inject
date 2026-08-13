@@ -5,6 +5,7 @@
 #include "qt/dialogs.hpp"
 #include "qt/form.hpp"
 
+#include "core/console_mode.hpp"
 #include "core/method.hpp"
 #include "proton/proton.hpp"
 
@@ -50,6 +51,20 @@ int method_index(const std::string& method) {
     const std::string canonical = proton_inject::normalize_method(method);
     for (int i = 0; i < static_cast<int>(k_methods.size()); ++i) {
         if (canonical == k_methods[static_cast<std::size_t>(i)].first) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+// same shape as the methods: canonical ids for the loader, labels for the reader.
+constexpr std::array<std::pair<const char*, const char*>, 3> k_console_modes{
+    {{"alloc", "New window"}, {"attach", "Use existing"}, {"none", "Off"}}};
+
+int console_mode_index(const std::string& mode) {
+    const std::string canonical = proton_inject::normalize_console_mode(mode);
+    for (int i = 0; i < static_cast<int>(k_console_modes.size()); ++i) {
+        if (canonical == k_console_modes[static_cast<std::size_t>(i)].first) {
             return i;
         }
     }
@@ -120,6 +135,7 @@ MainWindow::MainWindow() {
     refresh_game_combo();
     sync_source_state();
     sync_dll_input_state();
+    sync_loader_console_state();
     update_resolved_proton();
     update_action_states();
     size_to_content();
@@ -310,7 +326,19 @@ void MainWindow::add_injection_group(form::Form& form) {
     m_use_loader_check->setToolTip(
         QStringLiteral("Hot-load mods from the game's proton-inject-mods folder."));
     m_use_loader_check->setChecked(true);
-    form.add(QStringLiteral("Mods"), form::make_row({m_use_loader_check}, false));
+
+    m_loader_console_label = new QLabel(QStringLiteral("Console"));
+    m_loader_console_combo = new QComboBox;
+    for (const auto& [id, label] : k_console_modes) {
+        m_loader_console_combo->addItem(QString::fromLatin1(label));
+    }
+    m_loader_console_combo->setToolTip(QStringLiteral(
+        "New window allocates a console for the game. Use existing writes into one the game "
+        "already has, which is what you want when a mod loader such as BepInEx allocated it "
+        "first. Off keeps the loader silent."));
+    form.add(QStringLiteral("Mods"),
+             form::make_row({m_use_loader_check, m_loader_console_label, m_loader_console_combo},
+                            false));
 
     m_dll_list = form::make_list(kDllListHeight);
     m_dll_list->setMaximumHeight(kDllListHeight);
@@ -479,8 +507,8 @@ QWidget* MainWindow::build_loader_page() {
 
     auto* description = new QLabel(
         QStringLiteral("Scanned from Steam libraries for the current AppID, or from the Wine "
-                       "prefix for non-Steam games. Inject the loader once to create the "
-                       "folder."));
+                       "prefix for non-Steam games. Adding a mod creates the folder if the "
+                       "loader has not yet."));
     description->setWordWrap(true);
     description->setEnabled(false);
     layout->addWidget(description);
@@ -493,9 +521,14 @@ QWidget* MainWindow::build_loader_page() {
     layout->addWidget(m_loader_path_label);
 
     auto* refresh_btn = new QPushButton(QStringLiteral("Refresh"));
+    m_add_mod_btn = new QPushButton(QStringLiteral("Add…"));
+    m_add_mod_btn->setEnabled(false);
+    m_remove_mod_btn = new QPushButton(QStringLiteral("Remove"));
+    m_remove_mod_btn->setEnabled(false);
     m_open_mods_btn = new QPushButton(QStringLiteral("Open Mods Directory"));
     m_open_mods_btn->setEnabled(false);
-    layout->addWidget(form::make_row({refresh_btn, m_open_mods_btn}, false));
+    layout->addWidget(
+        form::make_row({refresh_btn, m_add_mod_btn, m_remove_mod_btn, m_open_mods_btn}, false));
 
     layout->addWidget(form::make_heading(QStringLiteral("DLL Files in Mods Directory")));
 
@@ -503,6 +536,8 @@ QWidget* MainWindow::build_loader_page() {
     layout->addWidget(m_loader_mods_list, 1);
 
     connect(refresh_btn, &QPushButton::clicked, this, &MainWindow::refresh_loader_mods);
+    connect(m_add_mod_btn, &QPushButton::clicked, this, &MainWindow::add_loader_mod);
+    connect(m_remove_mod_btn, &QPushButton::clicked, this, &MainWindow::remove_loader_mod);
     connect(m_open_mods_btn, &QPushButton::clicked, this, &MainWindow::open_mods_directory);
 
     return page;
@@ -591,6 +626,7 @@ void MainWindow::apply_config(const InjectionConfig& config) {
     m_app_id_entry->setText(to_qt(config.app_id));
     m_exe_entry->setText(to_qt(config.exe_path));
     m_use_loader_check->setChecked(config.use_loader);
+    m_loader_console_combo->setCurrentIndex(console_mode_index(config.loader_console));
 
     m_dll_list->clear();
     if (!config.use_loader) {
@@ -621,6 +657,7 @@ void MainWindow::apply_config(const InjectionConfig& config) {
 
     sync_source_state();
     sync_dll_input_state();
+    sync_loader_console_state();
     sync_game_dir_button();
     update_resolved_proton();
     update_action_states();
@@ -633,6 +670,9 @@ InjectionConfig MainWindow::collect_config() const {
     config.game_name = game_name_for(config.app_id);
     config.exe_path = gui_util::trim(from_qt(m_exe_entry->text()));
     config.use_loader = m_use_loader_check->isChecked();
+    config.loader_console = k_console_modes[static_cast<std::size_t>(std::max(
+                                                0, m_loader_console_combo->currentIndex()))]
+                                .first;
     config.method =
         k_methods[static_cast<std::size_t>(std::max(0, m_method_combo->currentIndex()))].first;
     config.sleep_ms = sleep_ms_value();
@@ -893,6 +933,7 @@ void MainWindow::sync_source_state() {
 
 void MainWindow::on_use_loader_toggled() {
     sync_dll_input_state();
+    sync_loader_console_state();
     refresh_loader_mods();
 }
 
@@ -902,6 +943,13 @@ void MainWindow::sync_dll_input_state() {
     const bool manual = !m_use_loader_check->isChecked();
     m_dll_caption->setEnabled(manual);
     m_dll_fields->setEnabled(manual);
+}
+
+// only the embedded loader has a console to talk about; an arbitrary DLL brings its own.
+void MainWindow::sync_loader_console_state() {
+    const bool loader = m_use_loader_check->isChecked();
+    m_loader_console_label->setEnabled(loader);
+    m_loader_console_combo->setEnabled(loader);
 }
 
 void MainWindow::start_injection() {
@@ -958,26 +1006,78 @@ void MainWindow::refresh_loader_mods() {
     m_loader_mods_list->clear();
 
     const std::string mods_dir = mods_directory();
-    m_open_mods_btn->setEnabled(!mods_dir.empty());
+    // the folder only appears once the loader or an added mod puts something in it, so the
+    // path is known well before it exists.
+    const bool created = gui_util::path_exists(mods_dir);
+    m_add_mod_btn->setEnabled(!mods_dir.empty());
+    m_open_mods_btn->setEnabled(created);
+
+    const std::vector<std::string> mods =
+        created ? ModsDirectory::list_dlls(mods_dir) : std::vector<std::string>{};
+    m_remove_mod_btn->setEnabled(!mods.empty());
+    set_items(*m_loader_mods_list,
+              mods.empty() ? std::vector<std::string>{"(no DLL files found)"} : mods);
 
     if (mods_dir.empty()) {
         m_loader_path_label->setText(
-            QStringLiteral("No proton-inject-mods folder found yet.\n"
-                           "Inject the mod loader once to create it, then click Refresh."));
-        set_items(*m_loader_mods_list, {"(no DLL files found)"});
+            QStringLiteral("No prefix for this game yet.\n"
+                           "Run the game once (or inject) to create it, then click Refresh."));
+    } else {
+        m_loader_path_label->setText(
+            to_qt(created ? mods_dir : mods_dir + "\n(created when you add the first mod)"));
+    }
+}
+
+void MainWindow::add_loader_mod() {
+    const std::string mods_dir = mods_directory();
+    if (mods_dir.empty()) {
+        set_status("No prefix for this game yet. Run the game once, then click Refresh.");
         return;
     }
 
-    m_loader_path_label->setText(to_qt(mods_dir));
-    const std::vector<std::string> mods = ModsDirectory::list_dlls(mods_dir);
-    set_items(*m_loader_mods_list,
-              mods.empty() ? std::vector<std::string>{"(no DLL files found)"} : mods);
+    const std::string files = dialogs::open_file(this, "Select Mod DLL(s)",
+                                                 {{"DLL Files", "dll"}, {"All Files", "*"}}, true);
+
+    int added = 0;
+    for (const std::string& path : gui_util::split(files, '\n')) {
+        if (const auto copied = ModsDirectory::add(mods_dir, path); !copied) {
+            dialogs::alert(this, "Add Mod Failed", copied.error());
+            break;
+        }
+        ++added;
+    }
+
+    if (added > 0) {
+        show_toast("Added " + std::to_string(added) + (added == 1 ? " mod." : " mods."));
+    }
+    refresh_loader_mods();
+}
+
+void MainWindow::remove_loader_mod() {
+    const std::string name = selected_text(*m_loader_mods_list);
+    const std::string mods_dir = mods_directory();
+    if (name.empty() || mods_dir.empty()) {
+        set_status("Select a mod to remove.");
+        return;
+    }
+
+    if (!dialogs::confirm(this, "Remove Mod", "Delete \"" + name + "\" from the mods folder?",
+                          true)) {
+        return;
+    }
+
+    if (const auto removed = ModsDirectory::remove(mods_dir, name); !removed) {
+        dialogs::alert(this, "Remove Failed", removed.error());
+    } else {
+        set_status("Removed mod: " + name);
+    }
+    refresh_loader_mods();
 }
 
 void MainWindow::open_mods_directory() {
     const std::string mods_dir = mods_directory();
-    if (mods_dir.empty()) {
-        set_status("No mods directory found yet. Inject the loader once, then try again.");
+    if (!gui_util::path_exists(mods_dir)) {
+        set_status("No mods directory yet. Add a mod or inject the loader once, then try again.");
         return;
     }
 

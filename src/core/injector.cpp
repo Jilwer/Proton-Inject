@@ -1,5 +1,6 @@
 #include "core/injector.hpp"
 
+#include "core/console_mode.hpp"
 #include "core/embedded_assets.hpp"
 #include "core/method.hpp"
 #include "proton/proton.hpp"
@@ -160,6 +161,21 @@ std::expected<void, std::string> write_embedded_file(const fs::path& path,
     }
     std::error_code ec;
     fs::permissions(path, permissions, ec);
+    return {};
+}
+
+// the loader reads this from beside its own module: the game process is not ours to give
+// an environment or a command line to, so a staged file is the only way in.
+std::expected<void, std::string> write_loader_settings(const fs::path& path,
+                                                       const std::string& console_mode) {
+    std::ofstream output(path);
+    if (!output) {
+        return std::unexpected("Failed to write loader settings to " + path.string());
+    }
+    output << "console=" << console_mode << '\n';
+    if (!output) {
+        return std::unexpected("Failed to write loader settings to " + path.string());
+    }
     return {};
 }
 
@@ -498,6 +514,11 @@ std::expected<void, std::string> Injector::inject_with(const InjectOptions& opti
     if (!valid_method(resolved.method)) {
         return std::unexpected("Unsupported injection method \"" + options.method + "\"");
     }
+    resolved.loader_console = normalize_console_mode(options.loader_console);
+    if (!valid_console_mode(resolved.loader_console)) {
+        return std::unexpected("Unsupported loader console mode \"" + options.loader_console +
+                               "\" (want: alloc, attach, none)");
+    }
     if (resolved.target_exe.empty()) {
         return std::unexpected("Invalid target executable name");
     }
@@ -547,6 +568,12 @@ std::expected<void, std::string> Injector::inject_with(const InjectOptions& opti
         }
         debug("Staged loader at " + target_dll + " (" + std::to_string(embedded::loader_dll_size) +
               " bytes)");
+        if (const auto err =
+                write_loader_settings(stage_path / "loader.cfg", resolved.loader_console);
+            !err) {
+            return err;
+        }
+        debug("Loader console mode: " + resolved.loader_console);
     } else {
         std::error_code ec;
         if (!fs::exists(target_dll, ec) || fs::is_directory(target_dll, ec)) {

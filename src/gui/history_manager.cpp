@@ -92,6 +92,9 @@ std::vector<HistoryEntry> HistoryManager::entries() const {
         if (parts.size() > 9) {
             config.wine_prefix = parts[9];
         }
+        if (parts.size() > 11 && !parts[11].empty()) {
+            config.loader_console = parts[11];
+        }
 
         entry.config = config;
         result.push_back(std::move(entry));
@@ -125,6 +128,7 @@ void HistoryManager::save(const InjectionConfig& config) {
         std::to_string(config.sleep_ms),
         config.wine_prefix,
         config.use_loader ? "true" : "false",
+        config.loader_console,
     };
 
     std::vector<std::string> lines{gui_util::join(fields, "|")};

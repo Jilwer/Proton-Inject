@@ -19,8 +19,9 @@ Download the latest release from the [release page](https://github.com/Jilwer/Pr
 - Steam games run via `proton runinprefix`
 - Non-Steam games run via umu-run
 - Optional loader DLL with a mods folder under the prefix Documents directory
+- Mods added and removed from the Loader tab
 - Profiles for saving AppIDs and settings
-- Portable single binary
+- Portable single binary that can install itself with a desktop entry
 
 ## Injection Methods
 
@@ -33,6 +34,22 @@ Download the latest release from the [release page](https://github.com/Jilwer/Pr
 ## Installation
 Download a release binary or build from source. Not packaged for distro repos.
 
+The binary is portable, but it can install itself for a menu entry:
+
+```bash
+./proton-inject --install
+```
+
+It copies itself to `~/.local/bin`, installs its icons, and writes
+`~/.local/share/applications/proton-inject.desktop`. Everything lands under `$HOME`, so no root
+is involved. To reverse it:
+
+```bash
+proton-inject --uninstall
+```
+
+Profiles and settings are left in place.
+
 ## F.A.Q
 ### Which injection method should I use?
 Start with `crt`. It has the best Proton/Wine compatibility. See the table above for a quick comparison.
@@ -42,8 +59,12 @@ Start with `crt`. It has the best Proton/Wine compatibility. See the table above
 ### Where are mods stored?
 `<Proton Prefix>/drive_c/users/steamuser/Documents/proton-inject-mods`
 
+The Loader tab's **Add…** copies DLLs in there and **Remove** deletes them, creating the folder on
+the first mod if the loader has not run yet.
+
 ### Do I need to install it?
-No. It is fully portable, just run the binary.
+No. It is fully portable, just run the binary. `--install` is there if you want it in your
+application menu.
 
 ## Building
 
@@ -51,7 +72,7 @@ Requirements:
 
 - CMake 3.25+ and Ninja
 - C++23 compiler (GCC 13+ or Clang 17+)
-- Qt 6.2+ Widgets (`qt6-base-dev` on Debian/Ubuntu)
+- Qt 6 Widgets (`qt6-base-dev` on Debian/Ubuntu)
 - MinGW-w64 (`x86_64-w64-mingw32-g++`) and `objcopy`
 
 ```bash
@@ -83,3 +104,10 @@ Treat any committed code as your own, review it, and make sure you have an under
 ## License
 
 This code is licensed under the GNU GPL v3. Please see the [LICENSE](LICENSE) file for more details.
+<<<<<<< HEAD
+=======
+
+---
+
+<sub><b>AI Disclosure:</b> This started as handwritten Go (Fyne GUI) and Rust. That stack felt unintuitive, overengineered, and bloated (20MB binary vs 3MB), so Claude Opus 5 did the first pass of the C++23 / Qt 6 port. I went through it afterwards and cleaned it up.</sub>
+>>>>>>> 57daae8 (Manage mods from the Loader tab and add --install.)

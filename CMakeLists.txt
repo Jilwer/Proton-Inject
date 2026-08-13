@@ -38,11 +38,13 @@ if(MINGW_CXX_COMPILER AND OBJCOPY)
             -DWIN32_LEAN_AND_MEAN -DNOMINMAX
             ${CMAKE_SOURCE_DIR}/windows/loader/dllmain.cpp
             ${CMAKE_SOURCE_DIR}/windows/loader/mod_loader.cpp
+            ${CMAKE_SOURCE_DIR}/windows/loader/console.cpp
             -o ${LOADER_DLL}
             -luser32 -lshell32 -lole32
         DEPENDS
             ${CMAKE_SOURCE_DIR}/windows/loader/dllmain.cpp
             ${CMAKE_SOURCE_DIR}/windows/loader/mod_loader.cpp
+            ${CMAKE_SOURCE_DIR}/windows/loader/console.cpp
         COMMENT "Building loader.dll (MinGW)"
         VERBATIM
     )
@@ -111,7 +113,9 @@ set(SOURCES
     src/config/config.cpp
     src/core/injector.cpp
     src/core/method.cpp
+    src/core/console_mode.cpp
     src/core/embedded_assets.cpp
+    src/install/installer.cpp
     src/proton/proton.cpp
     src/proton/vdf.cpp
     src/utils/utils.cpp

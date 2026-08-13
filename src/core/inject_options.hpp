@@ -14,6 +14,7 @@ struct InjectOptions {
     std::string target_exe;
     std::string dll_path;
     std::string method;
+    std::string loader_console;
     std::vector<std::string> target_args;
     bool non_steam = false;
     bool use_loader = false;

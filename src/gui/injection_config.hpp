@@ -13,6 +13,7 @@ struct InjectionConfig {
     std::string exe_path;
     std::vector<std::string> dll_paths;
     bool use_loader = false;
+    std::string loader_console = "alloc";
     std::string method = "crt";
     int sleep_ms = 0;
     std::string wine_prefix;

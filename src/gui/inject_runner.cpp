@@ -74,6 +74,7 @@ bool InjectRunner::inject_once(const InjectionConfig& config, const std::string&
     options.method = config.method;
     options.non_steam = config.mode == InjectionMode::NonSteam;
     options.use_loader = config.use_loader;
+    options.loader_console = config.loader_console;
     options.sleep_ms = static_cast<std::uint32_t>(config.sleep_ms);
 
     proton_inject::Injector injector;

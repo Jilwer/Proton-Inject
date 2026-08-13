@@ -56,6 +56,8 @@ private:
     void on_use_loader_toggled();
     void start_injection();
     void refresh_loader_mods();
+    void add_loader_mod();
+    void remove_loader_mod();
     void open_mods_directory();
     void clear_logs();
     void copy_logs();
@@ -72,6 +74,7 @@ private:
     void show_toast(const std::string& message);
     void sync_source_state();
     void sync_dll_input_state();
+    void sync_loader_console_state();
     void refresh_history_combo();
     void refresh_game_combo();
     void sync_game_dir_button();
@@ -101,6 +104,8 @@ private:
     QLineEdit* m_exe_entry = nullptr;
     QListWidget* m_dll_list = nullptr;
     QCheckBox* m_use_loader_check = nullptr;
+    QLabel* m_loader_console_label = nullptr;
+    QComboBox* m_loader_console_combo = nullptr;
     QLabel* m_dll_caption = nullptr;
     QWidget* m_dll_fields = nullptr;
     QLineEdit* m_sleep_entry = nullptr;
@@ -118,6 +123,8 @@ private:
     QCheckBox* m_new_use_loader = nullptr;
 
     QLabel* m_loader_path_label = nullptr;
+    QPushButton* m_add_mod_btn = nullptr;
+    QPushButton* m_remove_mod_btn = nullptr;
     QPushButton* m_open_mods_btn = nullptr;
     QListWidget* m_loader_mods_list = nullptr;
     QPlainTextEdit* m_log_view = nullptr;

@@ -76,6 +76,11 @@ InjectionConfig ProfileManager::config_from_json(const nlohmann::json& obj) {
     config.exe_path = optional_string(obj, "exe");
     config.use_loader = optional_bool(obj, "use_loader", true);
 
+    config.loader_console = optional_string(obj, "loader_console");
+    if (config.loader_console.empty()) {
+        config.loader_console = "alloc";
+    }
+
     const std::string dll_path = optional_string(obj, "dll_path");
     if (!dll_path.empty()) {
         config.dll_paths = {dll_path};
@@ -105,6 +110,10 @@ nlohmann::json ProfileManager::json_from_config(const InjectionConfig& config) {
     }
 
     obj["use_loader"] = config.use_loader;
+
+    if (config.use_loader && !config.loader_console.empty()) {
+        obj["loader_console"] = config.loader_console;
+    }
 
     if (!config.use_loader && !config.dll_paths.empty()) {
         obj["dll_path"] = config.dll_paths.front();

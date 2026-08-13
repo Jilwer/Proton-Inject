@@ -14,6 +14,7 @@ struct AppConfig {
     std::optional<std::string> target_exe;
     std::optional<std::string> dll_path;
     std::optional<bool> use_loader;
+    std::optional<std::string> loader_console;
     std::optional<std::string> method;
     std::optional<bool> non_steam;
     std::optional<std::string> proton_path;

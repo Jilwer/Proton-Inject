@@ -39,6 +39,9 @@ void to_json(nlohmann::json& json, const AppConfig& config) {
     if (config.use_loader) {
         json["use_loader"] = *config.use_loader;
     }
+    if (config.loader_console) {
+        json["loader_console"] = *config.loader_console;
+    }
     if (config.method) {
         json["method"] = *config.method;
     }
@@ -71,6 +74,9 @@ void from_json(const nlohmann::json& json, AppConfig& config) {
     }
     if (json.contains("use_loader")) {
         config.use_loader = json["use_loader"].get<bool>();
+    }
+    if (json.contains("loader_console")) {
+        config.loader_console = json["loader_console"].get<std::string>();
     }
     if (json.contains("method")) {
         config.method = json["method"].get<std::string>();

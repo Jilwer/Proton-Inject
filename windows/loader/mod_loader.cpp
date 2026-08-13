@@ -1,10 +1,15 @@
 #include "mod_loader.hpp"
 
+#include "console.hpp"
+
+#include <cctype>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <mutex>
 #include <shlobj.h>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <windows.h>
 
@@ -17,14 +22,46 @@ namespace {
 std::mutex g_loaded_mutex;
 std::map<std::string, HMODULE> g_loaded_mods;
 
-void write_console_line(const std::string& line) {
-    const HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (output == nullptr || output == INVALID_HANDLE_VALUE) {
-        return;
+// the game process does not inherit our environment, so a file staged beside loader.dll is
+// the only channel proton-inject has for handing options to the injected DLL.
+fs::path settings_path(HINSTANCE instance) {
+    wchar_t buffer[MAX_PATH]{};
+    const DWORD length = GetModuleFileNameW(instance, buffer, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) {
+        return {};
     }
-    std::string message = line + "\r\n";
-    DWORD written = 0;
-    WriteConsoleA(output, message.c_str(), static_cast<DWORD>(message.size()), &written, nullptr);
+    return fs::path(buffer).parent_path() / "loader.cfg";
+}
+
+std::string trimmed(std::string_view value) {
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
+        value.remove_prefix(1);
+    }
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
+        value.remove_suffix(1);
+    }
+    return std::string(value);
+}
+
+std::string read_setting(const fs::path& path, const std::string_view key) {
+    if (path.empty()) {
+        return {};
+    }
+    std::ifstream input(path);
+    if (!input) {
+        return {};
+    }
+    for (std::string line; std::getline(input, line);) {
+        const auto separator = line.find('=');
+        if (separator == std::string::npos || line.starts_with("#")) {
+            continue;
+        }
+        if (trimmed(std::string_view(line).substr(0, separator)) != key) {
+            continue;
+        }
+        return trimmed(std::string_view(line).substr(separator + 1));
+    }
+    return {};
 }
 
 fs::path mods_directory() {
@@ -44,16 +81,16 @@ void load_mod(const fs::path& dll_path) {
         }
     }
 
-    write_console_line("Loading mod: " + key);
+    console::write_line("Loading mod: " + key);
     const HMODULE module = LoadLibraryA(key.c_str());
     if (module == nullptr) {
-        write_console_line("Failed to load mod: " + key);
+        console::write_line("Failed to load mod: " + key);
         return;
     }
 
     std::lock_guard lock(g_loaded_mutex);
     g_loaded_mods[key] = module;
-    write_console_line("Successfully loaded mod: " + key);
+    console::write_line("Successfully loaded mod: " + key);
 }
 
 void unload_mod(const fs::path& dll_path) {
@@ -65,7 +102,7 @@ void unload_mod(const fs::path& dll_path) {
     }
     if (FreeLibrary(it->second)) {
         g_loaded_mods.erase(it);
-        write_console_line("Successfully unloaded mod: " + key);
+        console::write_line("Successfully unloaded mod: " + key);
     }
 }
 
@@ -127,13 +164,14 @@ void watch_mods_directory(fs::path mods_dir) {
 
 }  // namespace
 
-void attach() {
-    AllocConsole();
-    write_console_line("Initializing mod system...");
+void attach(HINSTANCE instance) {
+    console::init(console::parse_mode(read_setting(settings_path(instance), "console"),
+                                      console::Mode::Alloc));
+    console::write_line("Initializing mod system...");
 
     const fs::path mods_dir = mods_directory();
     if (mods_dir.empty()) {
-        write_console_line("Failed to resolve Documents directory");
+        console::write_line("Failed to resolve Documents directory");
         return;
     }
 
@@ -141,7 +179,7 @@ void attach() {
     fs::create_directories(mods_dir, ec);
     load_existing_mods(mods_dir);
     watch_mods_directory(mods_dir);
-    write_console_line("Started watching mods directory for changes...");
+    console::write_line("Started watching mods directory for changes...");
 }
 
 void detach() {
