@@ -104,10 +104,3 @@ Treat any committed code as your own, review it, and make sure you have an under
 ## License
 
 This code is licensed under the GNU GPL v3. Please see the [LICENSE](LICENSE) file for more details.
-<<<<<<< HEAD
-=======
-
----
-
-<sub><b>AI Disclosure:</b> This started as handwritten Go (Fyne GUI) and Rust. That stack felt unintuitive, overengineered, and bloated (20MB binary vs 3MB), so Claude Opus 5 did the first pass of the C++23 / Qt 6 port. I went through it afterwards and cleaned it up.</sub>
->>>>>>> 57daae8 (Manage mods from the Loader tab and add --install.)
