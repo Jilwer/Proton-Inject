@@ -280,7 +280,8 @@ void MainWindow::add_game_group(form::Form& form, std::vector<QLabel*>& captions
 
     m_source_combo = new QComboBox;
     m_source_combo->addItems({QStringLiteral("Steam"), QStringLiteral("Non-Steam (umu)")});
-    m_source_combo->setToolTip(QStringLiteral("Non-Steam launches the game through umu-run."));
+    m_source_combo->setToolTip(QStringLiteral(
+        "Non-Steam attaches through umu-run; launch the game yourself first."));
     form.add(QStringLiteral("Source"), form::make_row({m_source_combo}, false));
 
     // Steam and non-Steam need different fields, but swapping the whole group in and out
@@ -689,32 +690,31 @@ InjectionConfig MainWindow::collect_config() const {
 
 std::expected<void, std::string> MainWindow::validate_config() const {
     const InjectionConfig config = collect_config();
-    const bool attach_mode = config.mode != InjectionMode::NonSteam;
+    // Both modes attach to an already-running game; they differ only in the launcher backend
+    // (Steam's runinprefix vs umu-run) and where the prefix comes from.
+    const bool steam = config.mode == InjectionMode::Steam;
 
     if (config.exe_path.empty()) {
         return std::unexpected("Please enter a game executable name or path.");
     }
 
-    if (attach_mode && config.app_id.empty()) {
+    if (steam && config.app_id.empty()) {
         return std::unexpected("AppID is required for Steam games (or pick Non-Steam).");
     }
 
     // a bare name is a process to attach to; anything else has to resolve to a real file.
-    const bool needs_real_path = !attach_mode || !InjectRunner::is_bare_exe_name(config.exe_path);
+    const bool needs_real_path = !InjectRunner::is_bare_exe_name(config.exe_path);
     if (needs_real_path && !gui_util::path_exists(config.exe_path) &&
         InjectRunner::resolve_launch_target(config.app_id, config.exe_path).empty()) {
-        return std::unexpected(
-            attach_mode ? "Enter a process name (e.g. Game.exe) or a valid executable path."
-                        : "Could not find game executable. Use a full path, or a name resolvable "
-                          "via the Steam AppID.");
+        return std::unexpected("Enter a process name (e.g. Game.exe) or a valid executable path.");
     }
 
-    if (!attach_mode && gui_util::find_executable("umu-run").empty()) {
+    if (!steam && gui_util::find_executable("umu-run").empty()) {
         return std::unexpected("umu-run is required for non-Steam games.");
     }
 
     if (!InjectRunner::has_valid_proton_path(config.proton_path)) {
-        if (!attach_mode) {
+        if (!steam) {
             return std::unexpected("Please select a valid Proton installation.");
         }
         // the Proton row already spells out why the AppID did not resolve.
@@ -964,11 +964,7 @@ void MainWindow::start_injection() {
     m_log_view->clear();
     m_inject_btn->setEnabled(false);
 
-    if (config.mode == InjectionMode::NonSteam) {
-        set_status("Launching and injecting...");
-    } else {
-        set_status("Attaching to " + InjectRunner::process_name_from_exe(config.exe_path) + "...");
-    }
+    set_status("Attaching to " + InjectRunner::process_name_from_exe(config.exe_path) + "...");
 
     std::thread([this, config]() {
         const bool ok = m_runner.run(config, [this](const std::string& line) {

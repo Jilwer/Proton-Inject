@@ -34,8 +34,9 @@ Profiles and settings are left in place.
 
 - C++ Qt 6 Widgets GUI that follows the system theme, with a shared CLI injection core
 - MinGW injector and loader embedded in the Linux binary
-- Steam games run via `proton runinprefix`
-- Non-Steam games run via umu-run
+- Both Steam and non-Steam games attach to an already-running game process — launch the game first, then inject
+- Steam games: the injector runs inside the game's Proton prefix via `proton runinprefix`
+- Non-Steam games: the injector runs in the same prefix via `umu-run` (set `--proton-path`/`PROTONPATH` and, optionally, `--wine-prefix`)
 - Optional loader DLL with a mods folder under the prefix Documents directory
 - Mods added and removed from the Loader tab
 - Profiles for saving AppIDs and settings

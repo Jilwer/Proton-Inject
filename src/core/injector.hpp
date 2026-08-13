@@ -23,7 +23,6 @@ private:
     [[nodiscard]] bool is_process_running(const std::string& process_name) const;
 };
 
-[[nodiscard]] bool launches_target(const InjectOptions& options);
 [[nodiscard]] std::vector<std::string> build_injector_args(const InjectOptions& options,
                                                            const std::string& target_dll,
                                                            bool staged_basenames = false);

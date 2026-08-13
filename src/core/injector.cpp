@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <regex>
 #include <sstream>
 #include <string_view>
@@ -204,13 +205,27 @@ std::string describe_exit_status(int status) {
     return "status " + std::to_string(status);
 }
 
-std::string injector_dll_argument(const InjectOptions& options, const std::string& target_dll,
-                                  const bool staged_basenames) {
+// Randomize the staged loader's filename so it does not present the same signature on disk or in
+// the module list on every injection. The loader locates loader.cfg relative to its own module
+// path, so the name itself carries no meaning.
+std::string random_loader_name() {
+    static constexpr std::string_view kAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+    std::random_device device;
+    std::mt19937 generator(device());
+    std::uniform_int_distribution<std::size_t> pick(0, kAlphabet.size() - 1);
+
+    std::string name;
+    name.reserve(12);
+    for (int i = 0; i < 12; ++i) {
+        name.push_back(kAlphabet[pick(generator)]);
+    }
+    name += ".dll";
+    return name;
+}
+
+std::string injector_dll_argument(const std::string& target_dll, const bool staged_basenames) {
     if (!staged_basenames) {
         return to_windows_path(target_dll);
-    }
-    if (options.use_loader) {
-        return "loader.dll";
     }
     return fs::path(target_dll).filename().string();
 }
@@ -448,10 +463,6 @@ std::expected<void, std::string> run_command(const std::string& program,
 
 }  // namespace
 
-bool launches_target(const InjectOptions& options) {
-    return options.non_steam;
-}
-
 std::expected<std::string, std::string> resolve_launch_target(const std::string& app_id,
                                                               const std::string& target) {
     auto expanded = expand_path(target);
@@ -481,19 +492,14 @@ std::expected<std::string, std::string> resolve_launch_target(const std::string&
 std::vector<std::string> build_injector_args(const InjectOptions& options,
                                              const std::string& target_dll,
                                              const bool staged_basenames) {
-    const bool launch = launches_target(options);
-    const auto dll_arg = injector_dll_argument(options, target_dll, staged_basenames);
+    const auto dll_arg = injector_dll_argument(target_dll, staged_basenames);
     std::vector<std::string> args;
 
-    if (launch) {
-        args.push_back(to_windows_path(options.target_exe));
-        args.push_back(dll_arg);
-    } else {
-        args.push_back("-n");
-        args.push_back(exe_name(options.target_exe));
-        args.push_back("-i");
-        args.push_back(dll_arg);
-    }
+    // Both Steam and non-Steam attach to an already-running game process.
+    args.push_back("-n");
+    args.push_back(exe_name(options.target_exe));
+    args.push_back("-i");
+    args.push_back(dll_arg);
 
     args.push_back("--method");
     args.push_back(normalize_method(options.method));
@@ -521,13 +527,6 @@ std::expected<void, std::string> Injector::inject_with(const InjectOptions& opti
     }
     if (resolved.target_exe.empty()) {
         return std::unexpected("Invalid target executable name");
-    }
-    if (launches_target(resolved)) {
-        const auto target = resolve_launch_target(resolved.app_id, resolved.target_exe);
-        if (!target) {
-            return std::unexpected(target.error());
-        }
-        resolved.target_exe = *target;
     }
 
     const auto stage_template = (fs::temp_directory_path() / "proton-inject-XXXXXX").string();
@@ -559,7 +558,7 @@ std::expected<void, std::string> Injector::inject_with(const InjectOptions& opti
 
     std::string target_dll = resolved.dll_path;
     if (resolved.use_loader) {
-        target_dll = (stage_path / "loader.dll").string();
+        target_dll = (stage_path / random_loader_name()).string();
         if (const auto err = write_embedded_file(
                 target_dll, embedded::loader_dll, embedded::loader_dll_size,
                 fs::perms::owner_all | fs::perms::group_read | fs::perms::others_read);
@@ -581,8 +580,10 @@ std::expected<void, std::string> Injector::inject_with(const InjectOptions& opti
         }
     }
 
-    const bool steam_attach = !resolved.non_steam && !launches_target(resolved);
-    const auto injector_args = build_injector_args(resolved, target_dll, steam_attach);
+    // Steam runs the injector inside the prefix via runinprefix with the stage dir as CWD, so
+    // basenames resolve; umu-run needs absolute Z:\ paths instead.
+    const bool use_staged_basenames = !resolved.non_steam;
+    const auto injector_args = build_injector_args(resolved, target_dll, use_staged_basenames);
     if (resolved.non_steam) {
         return run_umu(resolved, stage_path.string(), local_injector.string(), injector_args);
     }
@@ -616,14 +617,12 @@ std::expected<void, std::string> Injector::run_steam(
     std::vector<std::string> args{"runinprefix", "injector.exe"};
     args.insert(args.end(), injector_args.begin(), injector_args.end());
 
-    if (!launches_target(options)) {
-        debug("Waiting for game process to be ready...");
-        if (!wait_for_process(exe_name(options.target_exe), 30)) {
-            return std::unexpected("Game process not ready: process " +
-                                   exe_name(options.target_exe) + " not found within 30s");
-        }
-        debug("Game process is ready");
+    debug("Waiting for game process to be ready...");
+    if (!wait_for_process(exe_name(options.target_exe), 30)) {
+        return std::unexpected("Game process not ready: process " + exe_name(options.target_exe) +
+                               " not found within 30s");
     }
+    debug("Game process is ready");
 
     std::string program = install->script_path();
     if (!is_executable(program)) {
@@ -705,6 +704,13 @@ std::expected<void, std::string> Injector::run_umu(
     if (game_id.empty()) {
         game_id = "0";
     }
+
+    debug("Waiting for game process to be ready...");
+    if (!wait_for_process(exe_name(options.target_exe), 30)) {
+        return std::unexpected("Game process not ready: process " + exe_name(options.target_exe) +
+                               " not found within 30s");
+    }
+    debug("Game process is ready");
 
     std::vector<std::string> args{local_injector};
     args.insert(args.end(), injector_args.begin(), injector_args.end());

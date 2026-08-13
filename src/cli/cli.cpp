@@ -167,7 +167,8 @@ std::expected<void, std::string> run_cli(int argc, char** argv) {
                    "Loader console: alloc (new window), attach (reuse the game's existing "
                    "console, e.g. BepInEx's), none (default: alloc)");
     app.add_option("--method", method, "Injection method: crt, apc, nt (default: crt)");
-    app.add_flag("--non-steam", non_steam, "Non-Steam game via umu-run");
+    app.add_flag("--non-steam", non_steam,
+                 "Non-Steam game: attach via umu-run (launch the game yourself first)");
     app.add_option("--proton-path", proton_path,
                    "Proton directory (required for --non-steam unless PROTONPATH is set)");
     app.add_option("--wine-prefix", wine_prefix,
