@@ -90,8 +90,8 @@ Optional: `just build`, `just release`, `just run`
 
 Vendored under `third_party/`:
 
-- [CLI11](https://github.com/CLIUtils/CLI11) 2.4.2 (BSD-3-Clause) for CLI argument parsing
-- [nlohmann/json](https://github.com/nlohmann/json) 3.11.3 (MIT) for profile config serialization
+- [CLI11](https://github.com/CLIUtils/CLI11) 2.7.2 (BSD-3-Clause) for CLI argument parsing
+- [nlohmann/json](https://github.com/nlohmann/json) 3.12.0 (MIT) for profile config serialization
 
 ## Thanks
 - [proton-injector](https://github.com/jokelbaf/proton-injector) (MIT) for reference material on apc and nt injection methods
