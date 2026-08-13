@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024, University of Cincinnati, developed by Henry Schreiner
+// Copyright (c) 2017-2026, University of Cincinnati, developed by Henry Schreiner
 // under NSF AWARD 1414736 and by the respective contributors.
 // All rights reserved.
 //
@@ -10,18 +10,18 @@
 #include "Macros.hpp"
 
 // [CLI11:public_includes:set]
+#include <cstddef>
 #include <string>
 // [CLI11:public_includes:end]
 
 // [CLI11:encoding_includes:verbatim]
-#ifdef CLI11_CPP17
+#if defined(CLI11_CPP17) || (defined(CLI11_HAS_FILESYSTEM) && CLI11_HAS_FILESYSTEM > 0)
 #include <string_view>
-#endif  // CLI11_CPP17
-
 #if defined CLI11_HAS_FILESYSTEM && CLI11_HAS_FILESYSTEM > 0
 #include <filesystem>
-#include <string_view>  // NOLINT(build/include)
-#endif                  // CLI11_HAS_FILESYSTEM
+#endif
+#endif
+
 // [CLI11:encoding_includes:end]
 
 namespace CLI {

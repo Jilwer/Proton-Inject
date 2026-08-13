@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024, University of Cincinnati, developed by Henry Schreiner
+// Copyright (c) 2017-2026, University of Cincinnati, developed by Henry Schreiner
 // under NSF AWARD 1414736 and by the respective contributors.
 // All rights reserved.
 //
@@ -9,14 +9,11 @@
 // IWYU pragma: private, include "CLI/CLI.hpp"
 
 // [CLI11:public_includes:set]
-#include <algorithm>
-#include <fstream>
-#include <iostream>
-#include <memory>
+#include <cstdint>
+#include <iosfwd>
 #include <string>
 #include <vector>
 // [CLI11:public_includes:end]
-
 #include "Error.hpp"
 #include "StringTools.hpp"
 
@@ -24,6 +21,9 @@ namespace CLI {
 // [CLI11:config_fwd_hpp:verbatim]
 
 class App;
+
+/// enumeration of output modes for writing config files
+enum class ConfigOutputMode : std::uint8_t { Active = 0, AllDefaults, ActiveSubcommandDefaults };
 
 /// Holds values to load into Options
 struct ConfigItem {
@@ -34,13 +34,10 @@ struct ConfigItem {
     std::string name{};
     /// Listing of inputs
     std::vector<std::string> inputs{};
-
+    /// @brief indicator if a multiline vector separator was inserted
+    bool multiline{false};
     /// The list of parents and name joined by "."
-    CLI11_NODISCARD std::string fullname() const {
-        std::vector<std::string> tmp = parents;
-        tmp.emplace_back(name);
-        return detail::join(tmp, ".");
-    }
+    CLI11_NODISCARD std::string fullname() const;
 };
 
 /// This class provides a converter for configuration files.
@@ -52,28 +49,18 @@ class Config {
     /// Convert an app into a configuration
     virtual std::string to_config(const App *, bool, bool, std::string) const = 0;
 
+    /// Convert an app into a configuration
+    virtual std::string
+    to_config(const App *app, ConfigOutputMode mode, bool write_description, std::string prefix) const;
+
     /// Convert a configuration into an app
     virtual std::vector<ConfigItem> from_config(std::istream &) const = 0;
 
     /// Get a flag value
-    CLI11_NODISCARD virtual std::string to_flag(const ConfigItem &item) const {
-        if(item.inputs.size() == 1) {
-            return item.inputs.at(0);
-        }
-        if(item.inputs.empty()) {
-            return "{}";
-        }
-        throw ConversionError::TooManyInputsFlag(item.fullname());  // LCOV_EXCL_LINE
-    }
+    CLI11_NODISCARD virtual std::string to_flag(const ConfigItem &item) const;
 
     /// Parse a config file, throw an error (ParseError:ConfigParseError or FileError) on failure
-    CLI11_NODISCARD std::vector<ConfigItem> from_file(const std::string &name) const {
-        std::ifstream input{name};
-        if(!input.good())
-            throw FileError::Missing(name);
-
-        return from_config(input);
-    }
+    CLI11_NODISCARD std::vector<ConfigItem> from_file(const std::string &name) const;
 
     /// Virtual destructor
     virtual ~Config() = default;
@@ -97,15 +84,22 @@ class ConfigBase : public Config {
     /// the character to use around single characters and literal strings
     char literalQuote = '\'';
     /// the maximum number of layers to allow
-    uint8_t maximumLayers{255};
+    std::uint8_t maximumLayers{255};
     /// the separator used to separator parent layers
     char parentSeparatorChar{'.'};
+    /// comment default values
+    bool commentDefaultsBool = false;
+    /// specify the config reader should collapse repeated field names to a single vector
+    bool allowMultipleDuplicateFields{false};
     /// Specify the configuration index to use for arrayed sections
     int16_t configIndex{-1};
     /// Specify the configuration section that should be used
     std::string configSection{};
 
   public:
+    std::string
+    to_config(const App * /*app*/, ConfigOutputMode mode, bool write_description, std::string prefix) const override;
+
     std::string
     to_config(const App * /*app*/, bool default_also, bool write_description, std::string prefix) const override;
 
@@ -147,6 +141,11 @@ class ConfigBase : public Config {
         parentSeparatorChar = sep;
         return this;
     }
+    /// comment default value options
+    ConfigBase *commentDefaults(bool comDef = true) {
+        commentDefaultsBool = comDef;
+        return this;
+    }
     /// get a reference to the configuration section
     std::string &sectionRef() { return configSection; }
     /// get the section
@@ -166,6 +165,11 @@ class ConfigBase : public Config {
         configIndex = sectionIndex;
         return this;
     }
+    /// specify that multiple duplicate arguments should be merged even if not sequential
+    ConfigBase *allowDuplicateFields(bool value = true) {
+        allowMultipleDuplicateFields = value;
+        return this;
+    }
 };
 
 /// the default Config is the TOML file format
@@ -175,13 +179,7 @@ using ConfigTOML = ConfigBase;
 class ConfigINI : public ConfigTOML {
 
   public:
-    ConfigINI() {
-        commentChar = ';';
-        arrayStart = '\0';
-        arrayEnd = '\0';
-        arraySeparator = ' ';
-        valueDelimiter = '=';
-    }
+    ConfigINI();
 };
 // [CLI11:config_fwd_hpp:end]
 }  // namespace CLI

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024, University of Cincinnati, developed by Henry Schreiner
+// Copyright (c) 2017-2026, University of Cincinnati, developed by Henry Schreiner
 // under NSF AWARD 1414736 and by the respective contributors.
 // All rights reserved.
 //
@@ -8,16 +8,11 @@
 
 // IWYU pragma: private, include "CLI/CLI.hpp"
 
-// On GCC < 4.8, the following define is often missing. Due to the
-// fact that this library only uses sleep_for, this should be safe
-#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ < 5 && __GNUC_MINOR__ < 8
-#define _GLIBCXX_USE_NANOSLEEP
-#endif
-
 #include <cmath>
 
 #include <array>
 #include <chrono>
+#include <cstdio>
 #include <functional>
 #include <iostream>
 #include <string>
@@ -123,9 +118,7 @@ class Timer {
 /// This class prints out the time upon destruction
 class AutoTimer : public Timer {
   public:
-    /// Reimplementing the constructor is required in GCC 4.7
-    explicit AutoTimer(std::string title = "Timer", time_print_t time_print = Simple) : Timer(title, time_print) {}
-    // GCC 4.7 does not support using inheriting constructors.
+    using Timer::Timer;
 
     /// This destructor prints the string
     ~AutoTimer() { std::cout << to_string() << '\n'; }

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024, University of Cincinnati, developed by Henry Schreiner
+// Copyright (c) 2017-2026, University of Cincinnati, developed by Henry Schreiner
 // under NSF AWARD 1414736 and by the respective contributors.
 // All rights reserved.
 //
@@ -9,12 +9,7 @@
 // IWYU pragma: private, include "CLI/CLI.hpp"
 
 // [CLI11:public_includes:set]
-#include <algorithm>
-#include <cctype>
-#include <fstream>
-#include <iostream>
 #include <string>
-#include <utility>
 #include <vector>
 // [CLI11:public_includes:end]
 

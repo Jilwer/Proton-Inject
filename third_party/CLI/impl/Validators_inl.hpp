@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024, University of Cincinnati, developed by Henry Schreiner
+// Copyright (c) 2017-2026, University of Cincinnati, developed by Henry Schreiner
 // under NSF AWARD 1414736 and by the respective contributors.
 // All rights reserved.
 //
@@ -15,13 +15,24 @@
 #include "../TypeTools.hpp"
 
 // [CLI11:public_includes:set]
-#include <map>
+#include <functional>
+#include <stdexcept>
 #include <string>
+#include <system_error>
 #include <utility>
 // [CLI11:public_includes:end]
 
 namespace CLI {
 // [CLI11:validators_inl_hpp:verbatim]
+
+CLI11_INLINE Validator::Validator(std::string validator_desc, std::function<std::string(std::string &)> func)
+    : desc_function_([validator_desc]() { return validator_desc; }), func_(std::move(func)) {}
+
+CLI11_INLINE Validator::Validator(std::function<std::string(std::string &)> op,
+                                  std::string validator_desc,
+                                  std::string validator_name)
+    : desc_function_([validator_desc]() { return validator_desc; }), func_(std::move(op)),
+      name_(std::move(validator_name)) {}
 
 CLI11_INLINE std::string Validator::operator()(std::string &str) const {
     std::string retstring;
@@ -36,9 +47,39 @@ CLI11_INLINE std::string Validator::operator()(std::string &str) const {
     return retstring;
 }
 
+CLI11_INLINE std::string Validator::operator()(const std::string &str) const {
+    std::string value = str;
+    return (active_) ? func_(value) : std::string{};
+}
+
 CLI11_NODISCARD CLI11_INLINE Validator Validator::description(std::string validator_desc) const {
     Validator newval(*this);
     newval.desc_function_ = [validator_desc]() { return validator_desc; };
+    return newval;
+}
+
+CLI11_NODISCARD CLI11_INLINE std::string Validator::get_description() const {
+    if(active_) {
+        return desc_function_();
+    }
+    return std::string{};
+}
+
+CLI11_NODISCARD CLI11_INLINE Validator Validator::name(std::string validator_name) const {
+    Validator newval(*this);
+    newval.name_ = std::move(validator_name);
+    return newval;
+}
+
+CLI11_NODISCARD CLI11_INLINE Validator Validator::active(bool active_val) const {
+    Validator newval(*this);
+    newval.active_ = active_val;
+    return newval;
+}
+
+CLI11_NODISCARD CLI11_INLINE Validator Validator::application_index(int app_index) const {
+    Validator newval(*this);
+    newval.application_index_ = app_index;
     return newval;
 }
 
@@ -168,7 +209,10 @@ CLI11_INLINE path_type check_path(const char *file) noexcept {
 #endif
 
 CLI11_INLINE ExistingFileValidator::ExistingFileValidator() : Validator("FILE") {
-    func_ = [](std::string &filename) {
+    func_ = [](std::string &filename) -> std::string {
+        if(filename.empty())
+            return std::string("File name is missing.");
+
         auto path_result = check_path(filename.c_str());
         if(path_result == path_type::nonexistent) {
             return "File does not exist: " + filename;
@@ -213,27 +257,6 @@ CLI11_INLINE NonexistentPathValidator::NonexistentPathValidator() : Validator("P
     };
 }
 
-CLI11_INLINE IPV4Validator::IPV4Validator() : Validator("IPV4") {
-    func_ = [](std::string &ip_addr) {
-        auto result = CLI::detail::split(ip_addr, '.');
-        if(result.size() != 4) {
-            return std::string("Invalid IPV4 address must have four parts (") + ip_addr + ')';
-        }
-        int num = 0;
-        for(const auto &var : result) {
-            using CLI::detail::lexical_cast;
-            bool retval = lexical_cast(var, num);
-            if(!retval) {
-                return std::string("Failed parsing number (") + var + ')';
-            }
-            if(num < 0 || num > 255) {
-                return std::string("Each IP number must be between 0 and 255 ") + var;
-            }
-        }
-        return std::string{};
-    };
-}
-
 CLI11_INLINE EscapedStringTransformer::EscapedStringTransformer() {
     func_ = [](std::string &str) {
         try {
@@ -261,7 +284,7 @@ CLI11_INLINE FileOnDefaultPath::FileOnDefaultPath(std::string default_path, bool
         auto path_result = detail::check_path(filename.c_str());
         if(path_result == detail::path_type::nonexistent) {
             std::string test_file_path = default_path;
-            if(default_path.back() != '/' && default_path.back() != '\\') {
+            if(!default_path.empty() && default_path.back() != '/' && default_path.back() != '\\') {
                 // Add folder separator
                 test_file_path += '/';
             }
@@ -279,41 +302,6 @@ CLI11_INLINE FileOnDefaultPath::FileOnDefaultPath(std::string default_path, bool
     };
 }
 
-CLI11_INLINE AsSizeValue::AsSizeValue(bool kb_is_1000) : AsNumberWithUnit(get_mapping(kb_is_1000)) {
-    if(kb_is_1000) {
-        description("SIZE [b, kb(=1000b), kib(=1024b), ...]");
-    } else {
-        description("SIZE [b, kb(=1024b), ...]");
-    }
-}
-
-CLI11_INLINE std::map<std::string, AsSizeValue::result_t> AsSizeValue::init_mapping(bool kb_is_1000) {
-    std::map<std::string, result_t> m;
-    result_t k_factor = kb_is_1000 ? 1000 : 1024;
-    result_t ki_factor = 1024;
-    result_t k = 1;
-    result_t ki = 1;
-    m["b"] = 1;
-    for(std::string p : {"k", "m", "g", "t", "p", "e"}) {
-        k *= k_factor;
-        ki *= ki_factor;
-        m[p] = k;
-        m[p + "b"] = k;
-        m[p + "i"] = ki;
-        m[p + "ib"] = ki;
-    }
-    return m;
-}
-
-CLI11_INLINE std::map<std::string, AsSizeValue::result_t> AsSizeValue::get_mapping(bool kb_is_1000) {
-    if(kb_is_1000) {
-        static auto m = init_mapping(true);
-        return m;
-    }
-    static auto m = init_mapping(false);
-    return m;
-}
-
 namespace detail {
 
 CLI11_INLINE std::pair<std::string, std::string> split_program_name(std::string commandline) {
@@ -322,7 +310,6 @@ CLI11_INLINE std::pair<std::string, std::string> split_program_name(std::string 
     trim(commandline);
     auto esp = commandline.find_first_of(' ', 1);
     while(detail::check_path(commandline.substr(0, esp).c_str()) != path_type::file) {
-        esp = commandline.find_first_of(' ', esp + 1);
         if(esp == std::string::npos) {
             // if we have reached the end and haven't found a valid file just assume the first argument is the
             // program name
@@ -349,6 +336,7 @@ CLI11_INLINE std::pair<std::string, std::string> split_program_name(std::string 
 
             break;
         }
+        esp = commandline.find_first_of(' ', esp + 1);
     }
     if(vals.first.empty()) {
         vals.first = commandline.substr(0, esp);
@@ -362,7 +350,6 @@ CLI11_INLINE std::pair<std::string, std::string> split_program_name(std::string 
 }
 
 }  // namespace detail
-/// @}
 
 // [CLI11:validators_inl_hpp:end]
 }  // namespace CLI

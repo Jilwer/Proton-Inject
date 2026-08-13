@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024, University of Cincinnati, developed by Henry Schreiner
+// Copyright (c) 2017-2026, University of Cincinnati, developed by Henry Schreiner
 // under NSF AWARD 1414736 and by the respective contributors.
 // All rights reserved.
 //
@@ -13,7 +13,14 @@
 
 // [CLI11:public_includes:set]
 #include <algorithm>
+#include <cerrno>
+#include <cstdlib>
+#include <functional>
+#include <iterator>
+#include <memory>
+#include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 // [CLI11:public_includes:end]
@@ -31,6 +38,19 @@ template <typename CRTP> template <typename T> void OptionBase<CRTP>::copy_to(T 
     other->delimiter(delimiter_);
     other->always_capture_default(always_capture_default_);
     other->multi_option_policy(multi_option_policy_);
+    other->callback_priority(callback_priority_);
+}
+
+CLI11_INLINE Option::Option(
+    std::string option_name, std::string option_description, callback_t callback, App *parent, bool allow_non_standard)
+    : description_(std::move(option_description)), parent_(parent), callback_(std::move(callback)) {
+    std::tie(snames_, lnames_, pname_) = detail::get_names(detail::split_names(option_name), allow_non_standard);
+}
+
+CLI11_INLINE void Option::clear() {
+    results_.clear();
+    proc_results_.clear();
+    current_option_state_ = option_state::parsing;
 }
 
 CLI11_INLINE Option *Option::expected(int value) {
@@ -73,72 +93,112 @@ CLI11_INLINE Option *Option::expected(int value_min, int value_max) {
     return this;
 }
 
+CLI11_INLINE Option *Option::check(Validator_p validator) {
+    validator->non_modifying();
+    validators_.push_back(std::move(validator));
+
+    return this;
+}
+
 CLI11_INLINE Option *Option::check(Validator validator, const std::string &validator_name) {
     validator.non_modifying();
-    validators_.push_back(std::move(validator));
-    if(!validator_name.empty())
-        validators_.back().name(validator_name);
+    auto vp = std::make_shared<Validator>(std::move(validator));
+    if(!validator_name.empty()) {
+        vp->name(validator_name);
+    }
+    validators_.push_back(std::move(vp));
+
     return this;
 }
 
-CLI11_INLINE Option *Option::check(std::function<std::string(const std::string &)> Validator,
-                                   std::string Validator_description,
-                                   std::string Validator_name) {
-    validators_.emplace_back(Validator, std::move(Validator_description), std::move(Validator_name));
-    validators_.back().non_modifying();
+CLI11_INLINE Option *Option::check(std::function<std::string(const std::string &)> validator_func,
+                                   std::string validator_description,
+                                   std::string validator_name) {
+
+    auto vp = std::make_shared<Validator>(
+        std::move(validator_func), std::move(validator_description), std::move(validator_name));
+    vp->non_modifying();
+    validators_.push_back(std::move(vp));
     return this;
 }
 
-CLI11_INLINE Option *Option::transform(Validator Validator, const std::string &Validator_name) {
-    validators_.insert(validators_.begin(), std::move(Validator));
-    if(!Validator_name.empty())
-        validators_.front().name(Validator_name);
+CLI11_INLINE Option *Option::transform(Validator_p validator) {
+    validators_.insert(validators_.begin(), std::move(validator));
+
     return this;
 }
 
-CLI11_INLINE Option *Option::transform(const std::function<std::string(std::string)> &func,
+CLI11_INLINE Option *Option::transform(Validator validator, const std::string &transform_name) {
+    auto vp = std::make_shared<Validator>(std::move(validator));
+    if(!transform_name.empty()) {
+        vp->name(transform_name);
+    }
+    validators_.insert(validators_.begin(), std::move(vp));
+    return this;
+}
+
+CLI11_INLINE Option *
+Option::transform(Validator validator, const std::string &transform_description, const std::string &transform_name) {
+    auto vp = std::make_shared<Validator>(std::move(validator));
+    if(!transform_name.empty()) {
+        vp->name(transform_name);
+    }
+    vp->description(transform_description);
+    validators_.insert(validators_.begin(), std::move(vp));
+    return this;
+}
+
+CLI11_INLINE Option *Option::transform(const std::function<std::string(std::string)> &transform_func,
                                        std::string transform_description,
                                        std::string transform_name) {
-    validators_.insert(validators_.begin(),
-                       Validator(
-                           [func](std::string &val) {
-                               val = func(val);
-                               return std::string{};
-                           },
-                           std::move(transform_description),
-                           std::move(transform_name)));
+    auto vp = std::make_shared<Validator>(
+        [transform_func](std::string &val) {
+            val = transform_func(val);
+            return std::string{};
+        },
+        std::move(transform_description),
+        std::move(transform_name));
+    validators_.insert(validators_.begin(), std::move(vp));
 
     return this;
 }
 
 CLI11_INLINE Option *Option::each(const std::function<void(std::string)> &func) {
-    validators_.emplace_back(
+    auto vp = std::make_shared<Validator>(
         [func](std::string &inout) {
             func(inout);
             return std::string{};
         },
         std::string{});
+    validators_.push_back(std::move(vp));
     return this;
 }
 
-CLI11_INLINE Validator *Option::get_validator(const std::string &Validator_name) {
-    for(auto &Validator : validators_) {
-        if(Validator_name == Validator.get_name()) {
-            return &Validator;
+CLI11_INLINE Validator *Option::get_validator(const std::string &validator_name) {
+    for(auto &validator : validators_) {
+        if(validator_name == validator->get_name()) {
+            return validator.get();
         }
     }
-    if((Validator_name.empty()) && (!validators_.empty())) {
-        return &(validators_.front());
+    if((validator_name.empty()) && (!validators_.empty())) {
+        return validators_.front().get();
     }
-    throw OptionNotFound(std::string{"Validator "} + Validator_name + " Not Found");
+    throw OptionNotFound(std::string{"Validator "} + validator_name + " Not Found");
 }
 
 CLI11_INLINE Validator *Option::get_validator(int index) {
-    // This is an signed int so that it is not equivalent to a pointer.
+    // This is a signed int so that it is not equivalent to a pointer.
     if(index >= 0 && index < static_cast<int>(validators_.size())) {
-        return &(validators_[static_cast<decltype(validators_)::size_type>(index)]);
+        return validators_[static_cast<decltype(validators_)::size_type>(index)].get();
     }
     throw OptionNotFound("Validator index is not valid");
+}
+
+CLI11_INLINE Option *Option::needs(Option *opt) {
+    if(opt != this) {
+        needs_.insert(opt);
+    }
+    return this;
 }
 
 CLI11_INLINE bool Option::remove_needs(Option *opt) {
@@ -230,7 +290,8 @@ CLI11_INLINE Option *Option::multi_option_policy(MultiOptionPolicy value) {
     return this;
 }
 
-CLI11_NODISCARD CLI11_INLINE std::string Option::get_name(bool positional, bool all_options) const {
+CLI11_NODISCARD CLI11_INLINE std::string
+Option::get_name(bool positional, bool all_options, bool disable_default_flag_values) const {
     if(get_group().empty())
         return {};  // Hidden
 
@@ -245,14 +306,14 @@ CLI11_NODISCARD CLI11_INLINE std::string Option::get_name(bool positional, bool 
         if((get_items_expected() == 0) && (!fnames_.empty())) {
             for(const std::string &sname : snames_) {
                 name_list.push_back("-" + sname);
-                if(check_fname(sname)) {
+                if(!disable_default_flag_values && check_fname(sname)) {
                     name_list.back() += "{" + get_flag_value(sname, "") + "}";
                 }
             }
 
             for(const std::string &lname : lnames_) {
                 name_list.push_back("--" + lname);
-                if(check_fname(lname)) {
+                if(!disable_default_flag_values && check_fname(lname)) {
                     name_list.back() += "{" + get_flag_value(lname, "") + "}";
                 }
             }
@@ -284,7 +345,9 @@ CLI11_NODISCARD CLI11_INLINE std::string Option::get_name(bool positional, bool 
 }
 
 CLI11_INLINE void Option::run_callback() {
+    bool used_default_str = false;
     if(force_callback_ && results_.empty()) {
+        used_default_str = true;
         add_result(default_str_);
     }
     if(current_option_state_ == option_state::parsing) {
@@ -294,16 +357,21 @@ CLI11_INLINE void Option::run_callback() {
 
     if(current_option_state_ < option_state::reduced) {
         _reduce_results(proc_results_, results_);
-        current_option_state_ = option_state::reduced;
     }
-    if(current_option_state_ >= option_state::reduced) {
-        current_option_state_ = option_state::callback_run;
-        if(!(callback_)) {
+
+    current_option_state_ = option_state::callback_run;
+    if(callback_) {
+        const results_t &send_results = proc_results_.empty() ? results_ : proc_results_;
+        if(send_results.empty()) {
             return;
         }
-        const results_t &send_results = proc_results_.empty() ? results_ : proc_results_;
         bool local_result = callback_(send_results);
-
+        if(used_default_str) {
+            // we only clear the results if the callback was actually used
+            // otherwise the callback is the storage of the default
+            results_.clear();
+            proc_results_.clear();
+        }
         if(!local_result)
             throw ConversionError(get_name(), results_);
     }
@@ -311,26 +379,27 @@ CLI11_INLINE void Option::run_callback() {
 
 CLI11_NODISCARD CLI11_INLINE const std::string &Option::matching_name(const Option &other) const {
     static const std::string estring;
+    bool bothConfigurable = configurable_ && other.configurable_;
     for(const std::string &sname : snames_) {
         if(other.check_sname(sname))
             return sname;
-        if(other.check_lname(sname))
+        if(bothConfigurable && other.check_lname(sname))
             return sname;
     }
     for(const std::string &lname : lnames_) {
         if(other.check_lname(lname))
             return lname;
-        if(lname.size() == 1) {
+        if(lname.size() == 1 && bothConfigurable) {
             if(other.check_sname(lname)) {
                 return lname;
             }
         }
     }
-    if(snames_.empty() && lnames_.empty() && !pname_.empty()) {
+    if(bothConfigurable && snames_.empty() && lnames_.empty() && !pname_.empty()) {
         if(other.check_sname(pname_) || other.check_lname(pname_) || pname_ == other.pname_)
             return pname_;
     }
-    if(other.snames_.empty() && other.fnames_.empty() && !other.pname_.empty()) {
+    if(bothConfigurable && other.snames_.empty() && other.fnames_.empty() && !other.pname_.empty()) {
         if(check_sname(other.pname_) || check_lname(other.pname_) || (pname_ == other.pname_))
             return other.pname_;
     }
@@ -442,10 +511,10 @@ CLI11_INLINE Option *Option::add_result(std::vector<std::string> s) {
 }
 
 CLI11_NODISCARD CLI11_INLINE results_t Option::reduced_results() const {
-    results_t res = proc_results_.empty() ? results_ : proc_results_;
+    const bool parsing = current_option_state_ == option_state::parsing;
+    results_t res = (parsing || proc_results_.empty()) ? results_ : proc_results_;
     if(current_option_state_ < option_state::reduced) {
-        if(current_option_state_ == option_state::parsing) {
-            res = results_;
+        if(parsing) {
             _validate_results(res);
         }
         if(!res.empty()) {
@@ -502,11 +571,36 @@ CLI11_INLINE Option *Option::type_size(int option_type_size_min, int option_type
     return this;
 }
 
+CLI11_NODISCARD CLI11_INLINE const std::string &Option::get_single_name() const {
+    if(!lnames_.empty()) {
+        return lnames_[0];
+    }
+    if(!snames_.empty()) {
+        return snames_[0];
+    }
+    if(!pname_.empty()) {
+        return pname_;
+    }
+    return envname_;
+}
+
+CLI11_INLINE Option *Option::type_name(std::string typeval) {
+    type_name_fn([typeval]() { return typeval; });
+    return this;
+}
+
+CLI11_INLINE Option *Option::capture_default_str() {
+    if(default_function_) {
+        default_str_ = default_function_();
+    }
+    return this;
+}
+
 CLI11_NODISCARD CLI11_INLINE std::string Option::get_type_name() const {
     std::string full_type_name = type_name_();
     if(!validators_.empty()) {
-        for(const auto &Validator : validators_) {
-            std::string vtype = Validator.get_description();
+        for(const auto &validator : validators_) {
+            std::string vtype = validator->get_description();
             if(!vtype.empty()) {
                 full_type_name += ":" + vtype;
             }
@@ -590,7 +684,7 @@ CLI11_INLINE void Option::_reduce_results(results_t &out, const results_t &origi
         }
     } break;
     case MultiOptionPolicy::Join:
-        if(results_.size() > 1) {
+        if(original.size() > 1) {
             out.push_back(detail::join(original, std::string(1, (delimiter_ == '\0') ? '\n' : delimiter_)));
         }
         break;
@@ -612,8 +706,9 @@ CLI11_INLINE void Option::_reduce_results(results_t &out, const results_t &origi
         }
         if(original.size() > num_max) {
             if(original.size() == 2 && num_max == 1 && original[1] == "%%" && original[0] == "{}") {
-                // this condition is a trap for the following empty indicator check on config files
-                out = original;
+                // this condition is a trap for the following empty indicator check on config files, it may not be used
+                // anymore
+                out = original;  // LCOV_EXCL_LINE
             } else {
                 throw ArgumentMismatch::AtMost(get_name(), static_cast<int>(num_max), original.size());
             }
@@ -640,10 +735,10 @@ CLI11_INLINE std::string Option::_validate(std::string &result, int index) const
         return err_msg;
     }
     for(const auto &vali : validators_) {
-        auto v = vali.get_application_index();
+        auto v = vali->get_application_index();
         if(v == -1 || v == index) {
             try {
-                err_msg = vali(result);
+                err_msg = (*vali)(result);
             } catch(const ValidationError &err) {
                 err_msg = err.what();
             }
@@ -657,11 +752,37 @@ CLI11_INLINE std::string Option::_validate(std::string &result, int index) const
 
 CLI11_INLINE int Option::_add_result(std::string &&result, std::vector<std::string> &res) const {
     int result_count = 0;
-    if(allow_extra_args_ && !result.empty() && result.front() == '[' &&
-       result.back() == ']') {  // this is now a vector string likely from the default or user entry
-        result.pop_back();
 
-        for(auto &var : CLI::detail::split(result.substr(1), ',')) {
+    // Handle the vector escape possibility all characters duplicated and starting with [[ ending with ]]
+    // this is always a single result
+    if(result.size() >= 4 && result[0] == '[' && result[1] == '[' && result.back() == ']' &&
+       (*(result.end() - 2) == ']')) {
+        // this is an escape clause for odd strings
+        std::string nstrs{'['};
+        bool duplicated{true};
+        for(std::size_t ii = 2; ii < result.size() - 2; ii += 2) {
+            if(result[ii] == result[ii + 1]) {
+                nstrs.push_back(result[ii]);
+            } else {
+                duplicated = false;
+                break;
+            }
+        }
+        if(duplicated) {
+            nstrs.push_back(']');
+            res.push_back(std::move(nstrs));
+            ++result_count;
+            return result_count;
+        }
+    }
+
+    if((allow_extra_args_ || get_expected_max() > 1 || get_type_size() > 1) && !result.empty() &&
+       result.front() == '[' &&
+       result.back() == ']') {  // this is now a vector string likely from the default or user entry
+
+        result.pop_back();
+        result.erase(result.begin());
+        for(auto &var : CLI::detail::split_up(result, ',')) {
             if(!var.empty()) {
                 result_count += _add_result(std::move(var), res);
             }

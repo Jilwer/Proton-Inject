@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024, University of Cincinnati, developed by Henry Schreiner
+// Copyright (c) 2017-2026, University of Cincinnati, developed by Henry Schreiner
 // under NSF AWARD 1414736 and by the respective contributors.
 // All rights reserved.
 //
@@ -25,6 +25,12 @@
 #include <utility>
 // [CLI11:public_includes:end]
 
+// [CLI11:encoding_inl_includes:verbatim]
+#if CLI11_HAS_CODECVT
+#include <codecvt>
+#endif
+// [CLI11:encoding_inl_includes:end]
+
 namespace CLI {
 // [CLI11:encoding_inl_hpp:verbatim]
 
@@ -33,7 +39,7 @@ namespace detail {
 #if !CLI11_HAS_CODECVT
 /// Attempt to set one of the acceptable unicode locales for conversion
 CLI11_INLINE void set_unicode_locale() {
-    static const std::array<const char *, 3> unicode_locales{{"C.UTF-8", "en_US.UTF-8", ".UTF-8"}};
+    static const std::array<const char *, 2> unicode_locales{{"C.UTF-8", ".UTF-8"}};
 
     for(const auto &locale_name : unicode_locales) {
         if(std::setlocale(LC_ALL, locale_name) != nullptr) {
@@ -69,9 +75,15 @@ CLI11_INLINE std::string narrow_impl(const wchar_t *str, std::size_t str_size) {
 
 #endif  // _WIN32
 #else   // CLI11_HAS_CODECVT
-    (void)str_size;
+    // Copy into a local, NUL-terminated buffer so the conversion is bounded by str_size: a view into the
+    // middle of a larger buffer or a non-NUL-terminated buffer must not be read past str_size. Note that an
+    // embedded NUL inside the first str_size characters will still terminate std::wcsrtombs early; this matches
+    // the behavior of C-style narrow conversion and is treated as a best-effort limitation.
+    std::wstring input(str, str_size);
+    const wchar_t *src = input.c_str();
+    const wchar_t *it = src;
+
     std::mbstate_t state = std::mbstate_t();
-    const wchar_t *it = str;
 
     std::string old_locale = std::setlocale(LC_ALL, nullptr);
     auto sg = scope_guard([&] { std::setlocale(LC_ALL, old_locale.c_str()); });
@@ -80,10 +92,10 @@ CLI11_INLINE std::string narrow_impl(const wchar_t *str, std::size_t str_size) {
     std::size_t new_size = std::wcsrtombs(nullptr, &it, 0, &state);
     if(new_size == static_cast<std::size_t>(-1)) {
         throw std::runtime_error("CLI::narrow: conversion error in std::wcsrtombs at offset " +
-                                 std::to_string(it - str));
+                                 std::to_string(it - src));
     }
     std::string result(new_size, '\0');
-    std::wcsrtombs(const_cast<char *>(result.data()), &str, new_size, &state);
+    std::wcsrtombs(const_cast<char *>(result.data()), &src, new_size, &state);
 
     return result;
 
@@ -100,9 +112,15 @@ CLI11_INLINE std::wstring widen_impl(const char *str, std::size_t str_size) {
 
 #endif  // _WIN32
 #else   // CLI11_HAS_CODECVT
-    (void)str_size;
+    // Copy into a local, NUL-terminated buffer so the conversion is bounded by str_size: a view into the
+    // middle of a larger buffer or a non-NUL-terminated buffer must not be read past str_size. Note that an
+    // embedded NUL inside the first str_size characters will still terminate std::mbsrtowcs early; this matches
+    // the behavior of C-style wide conversion and is treated as a best-effort limitation.
+    std::string input(str, str_size);
+    const char *src = input.c_str();
+    const char *it = src;
+
     std::mbstate_t state = std::mbstate_t();
-    const char *it = str;
 
     std::string old_locale = std::setlocale(LC_ALL, nullptr);
     auto sg = scope_guard([&] { std::setlocale(LC_ALL, old_locale.c_str()); });
@@ -111,10 +129,10 @@ CLI11_INLINE std::wstring widen_impl(const char *str, std::size_t str_size) {
     std::size_t new_size = std::mbsrtowcs(nullptr, &it, 0, &state);
     if(new_size == static_cast<std::size_t>(-1)) {
         throw std::runtime_error("CLI::widen: conversion error in std::mbsrtowcs at offset " +
-                                 std::to_string(it - str));
+                                 std::to_string(it - src));
     }
     std::wstring result(new_size, L'\0');
-    std::mbsrtowcs(const_cast<wchar_t *>(result.data()), &str, new_size, &state);
+    std::mbsrtowcs(const_cast<wchar_t *>(result.data()), &src, new_size, &state);
 
     return result;
 
