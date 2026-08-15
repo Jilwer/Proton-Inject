@@ -16,10 +16,10 @@ namespace proton_inject {
 
 namespace {
 
-constexpr const char* k_desktop_id = "proton-inject";
+constexpr const char* kDesktopId = "proton-inject";
 
 // hicolor promises icons of the directory's own size, so every size gets its own bitmap.
-constexpr std::array<int, 9> k_icon_sizes{16, 22, 24, 32, 48, 64, 128, 256, 512};
+constexpr std::array<int, 9> kIconSizes{16, 22, 24, 32, 48, 64, 128, 256, 512};
 
 fs::path home_directory() {
     if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
@@ -43,7 +43,7 @@ fs::path executable_path() {
 
 fs::path icon_path_for(int size) {
     const std::string dimensions = std::to_string(size) + "x" + std::to_string(size);
-    return install_paths().icons_root / dimensions / "apps" / (std::string(k_desktop_id) + ".png");
+    return install_paths().icons_root / dimensions / "apps" / (std::string(kDesktopId) + ".png");
 }
 
 bool same_file(const fs::path& left, const fs::path& right) {
@@ -86,7 +86,7 @@ void install_icons(const fs::path& source) {
         return;
     }
 
-    for (const int size : k_icon_sizes) {
+    for (const int size : kIconSizes) {
         const fs::path destination = icon_path_for(size);
         std::error_code ec;
         fs::create_directories(destination.parent_path(), ec);
@@ -101,7 +101,7 @@ void install_icons(const fs::path& source) {
 // hijacked that way, and falling back to the name at least survives a missing icon.
 std::string desktop_icon_value() {
     const fs::path installed = installed_icon_path();
-    return fs::exists(installed) ? installed.string() : std::string(k_desktop_id);
+    return fs::exists(installed) ? installed.string() : std::string(kDesktopId);
 }
 
 std::expected<void, std::string> write_desktop_entry(const fs::path& exec_path) {
@@ -124,7 +124,7 @@ std::expected<void, std::string> write_desktop_entry(const fs::path& exec_path) 
           // one main category only, so the entry cannot show up twice in a menu.
           << "Categories=Game;\n"
           << "Keywords=proton;steam;wine;dll;mod;\n"
-          << "StartupWMClass=" << k_desktop_id << "\n";
+          << "StartupWMClass=" << kDesktopId << "\n";
     return {};
 }
 
@@ -147,10 +147,9 @@ void refresh_desktop_caches() {
 }  // namespace
 
 InstallPaths install_paths() {
-    return {
-        .binary = home_directory() / ".local/bin" / k_desktop_id,
-        .desktop_entry = data_home() / "applications" / (std::string(k_desktop_id) + ".desktop"),
-        .icons_root = data_home() / "icons/hicolor"};
+    return {.binary = home_directory() / ".local/bin" / kDesktopId,
+            .desktop_entry = data_home() / "applications" / (std::string(kDesktopId) + ".desktop"),
+            .icons_root = data_home() / "icons/hicolor"};
 }
 
 fs::path bundled_icon_path() {
@@ -216,7 +215,7 @@ std::expected<void, std::string> uninstall_app() {
     const InstallPaths paths = install_paths();
 
     std::vector<fs::path> targets{paths.binary, paths.desktop_entry};
-    for (const int size : k_icon_sizes) {
+    for (const int size : kIconSizes) {
         targets.push_back(icon_path_for(size));
     }
 
