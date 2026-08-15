@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(proton-inject VERSION 1.3.2 LANGUAGES CXX)
+project(proton-inject VERSION 1.3.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,7 +35,7 @@ if(MINGW_CXX_COMPILER AND OBJCOPY)
         COMMAND ${CMAKE_COMMAND} -E make_directory ${WINDOWS_ARTIFACT_DIR}
         COMMAND
             ${MINGW_CXX_COMPILER} -shared -O2 -std=c++23 -static
-            -DWIN32_LEAN_AND_MEAN -DNOMINMAX
+            -Wall -Wextra -DWIN32_LEAN_AND_MEAN -DNOMINMAX
             ${CMAKE_SOURCE_DIR}/windows/loader/dllmain.cpp
             ${CMAKE_SOURCE_DIR}/windows/loader/mod_loader.cpp
             ${CMAKE_SOURCE_DIR}/windows/loader/console.cpp
@@ -54,7 +54,7 @@ if(MINGW_CXX_COMPILER AND OBJCOPY)
         COMMAND ${CMAKE_COMMAND} -E make_directory ${WINDOWS_ARTIFACT_DIR}
         COMMAND
             ${MINGW_CXX_COMPILER} -O2 -std=c++23 -static
-            -DWIN32_LEAN_AND_MEAN -DNOMINMAX
+            -Wall -Wextra -DWIN32_LEAN_AND_MEAN -DNOMINMAX
             ${CMAKE_SOURCE_DIR}/windows/injector/main.cpp
             ${CMAKE_SOURCE_DIR}/windows/injector/inject.cpp
             ${CMAKE_SOURCE_DIR}/windows/injector/method.cpp
@@ -131,7 +131,7 @@ set(SOURCES
     src/gui/inject_runner.cpp
     src/gui/steam_service.cpp
     src/gui/mods_directory.cpp
-    src/gui/profile_manager.cpp
+    src/gui/injection_config.cpp
     src/gui/history_manager.cpp
     ${EMBEDDED_OBJECTS}
 )

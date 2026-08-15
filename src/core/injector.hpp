@@ -21,13 +21,12 @@ private:
         const std::string& local_injector, const std::vector<std::string>& injector_args) const;
     [[nodiscard]] std::expected<void, std::string> run_iat(const InjectOptions& options,
                                                            const std::string& target_dll) const;
-    [[nodiscard]] bool wait_for_process(const std::string& process_name, int timeout_seconds) const;
-    [[nodiscard]] bool is_process_running(const std::string& process_name) const;
+    [[nodiscard]] bool wait_for_process(const std::string& process_name) const;
 };
 
 [[nodiscard]] std::vector<std::string> build_injector_args(const InjectOptions& options,
                                                            const std::string& target_dll,
-                                                           bool staged_basenames = false);
+                                                           bool staged_basenames);
 [[nodiscard]] std::expected<std::string, std::string> resolve_launch_target(
     const std::string& app_id, const std::string& target);
 

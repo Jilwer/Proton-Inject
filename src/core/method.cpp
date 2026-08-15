@@ -1,28 +1,17 @@
 #include "core/method.hpp"
 
-#include <algorithm>
+#include "utils/utils.hpp"
 
 namespace proton_inject {
 
+// "liat+ll" is what the GUI shows in its method combo, so typing what you see on screen into
+// --method works. Everything else is the canonical id.
 std::string normalize_method(const std::string_view method) {
-    std::string normalized(method);
-    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
-                   [](const unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-    if (normalized.empty() || normalized == "crt" || normalized == "standard" ||
-        normalized == "create_remote_thread") {
+    const auto normalized = to_lower(method);
+    if (normalized.empty()) {
         return std::string(kMethodCrt);
     }
-    if (normalized == "apc") {
-        return std::string(kMethodApc);
-    }
-    if (normalized == "nt" || normalized == "ntcreatethreadex") {
-        return std::string(kMethodNt);
-    }
-    if (normalized == "liatll" || normalized == "liat+ll" || normalized == "liat-ll" ||
-        normalized == "liat" || normalized == "iatll" || normalized == "iat+ll" ||
-        normalized == "iat-ll" || normalized == "iat" || normalized == "mem" ||
-        normalized == "proc_mem" || normalized == "native" || normalized == "linux") {
+    if (normalized == "liat+ll") {
         return std::string(kMethodLiatLl);
     }
     return normalized;

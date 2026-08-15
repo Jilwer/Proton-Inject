@@ -28,7 +28,6 @@ struct IatSlot {
     const ProcMem& mem, std::uintptr_t image_base, std::string_view function_name);
 
 [[nodiscard]] std::optional<IatSlot> find_iat_slot(const ProcMem& mem, std::uintptr_t image_base,
-                                                   std::string_view import_dll,
                                                    std::string_view function_name);
 
 [[nodiscard]] std::expected<std::vector<SectionCave>, std::string> find_pe_caves(

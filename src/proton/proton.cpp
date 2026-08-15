@@ -3,13 +3,11 @@
 #include "proton/vdf.hpp"
 #include "utils/utils.hpp"
 
-#include <algorithm>
 #include <array>
-#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <ranges>
+#include <set>
 #include <sstream>
 
 namespace fs = std::filesystem;
@@ -20,8 +18,6 @@ std::string ProtonInstall::script_path() const {
     return (fs::path(path) / "proton").string();
 }
 
-namespace {
-
 bool is_proton_dir(const std::string& dir) {
     if (dir.empty()) {
         return false;
@@ -30,15 +26,7 @@ bool is_proton_dir(const std::string& dir) {
     return fs::is_regular_file(fs::path(dir) / "proton", ec);
 }
 
-std::string trim(std::string value) {
-    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) {
-        value.erase(value.begin());
-    }
-    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) {
-        value.pop_back();
-    }
-    return value;
-}
+namespace {
 
 std::string proton_from_config_info(const fs::path& path) {
     std::ifstream input(path);
@@ -93,20 +81,16 @@ std::string compat_tool_name(const std::string& app_id) {
 
 std::vector<std::string> compat_tool_dirs() {
     std::vector<std::string> dirs;
-    std::string seen;
+    std::set<std::string> seen;
 
     const auto add = [&](const std::string& path) {
-        if (path.empty() || seen.find(path) != std::string::npos) {
-            return;
+        if (!path.empty() && seen.insert(path).second) {
+            dirs.push_back(path);
         }
-        seen += path + '\n';
-        dirs.push_back(path);
     };
 
     if (const char* extra = std::getenv("STEAM_EXTRA_COMPAT_TOOLS_PATHS"); extra != nullptr) {
-        std::stringstream stream(extra);
-        std::string item;
-        while (std::getline(stream, item, ':')) {
+        for (const auto& item : split(extra, ':')) {
             add(trim(item));
         }
     }
@@ -116,7 +100,7 @@ std::vector<std::string> compat_tool_dirs() {
     }
     add("/usr/share/steam/compatibilitytools.d");
     add("/usr/local/share/steam/compatibilitytools.d");
-    if (const char* home = std::getenv("HOME"); home != nullptr) {
+    if (const auto home = home_dir(); !home.empty()) {
         add((fs::path(home) / ".steam" / "compatibilitytools.d").string());
     }
     return dirs;
@@ -144,7 +128,7 @@ std::pair<std::string, std::string> read_compat_tool_manifest(const fs::path& to
 }
 
 // "Proton 9.0" and "Proton-9.0 (Beta)" both map to the compat tool id "proton_9".
-constexpr std::array<std::pair<std::string_view, std::string_view>, 2> k_name_substitutions{
+constexpr std::array<std::pair<std::string_view, std::string_view>, 2> kNameSubstitutions{
     {{"(Beta)", ""}, {"-", " "}}};
 
 std::string official_proton_name(std::string dir_name);
@@ -190,7 +174,7 @@ std::string official_proton_name(std::string dir_name) {
     }
     dir_name.erase(0, 6);
     dir_name = trim(dir_name);
-    for (const auto& [token, replacement] : k_name_substitutions) {
+    for (const auto& [token, replacement] : kNameSubstitutions) {
         for (auto pos = dir_name.find(token); pos != std::string::npos;
              pos = dir_name.find(token, pos)) {
             dir_name.replace(pos, token.size(), replacement);
@@ -203,9 +187,7 @@ std::string official_proton_name(std::string dir_name) {
 
     const auto dot = dir_name.find('.');
     if (dot == std::string::npos) {
-        std::transform(dir_name.begin(), dir_name.end(), dir_name.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        return "proton_" + dir_name;
+        return "proton_" + to_lower(dir_name);
     }
 
     const auto major = dir_name.substr(0, dot);

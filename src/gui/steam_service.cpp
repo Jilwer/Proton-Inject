@@ -17,12 +17,12 @@ namespace {
 
 // appmanifest_<id>.acf
 std::string app_id_from_manifest(const std::string& filename) {
-    static constexpr std::string_view k_prefix = "appmanifest_";
-    static constexpr std::string_view k_suffix = ".acf";
-    if (!filename.starts_with(k_prefix) || !filename.ends_with(k_suffix)) {
+    static constexpr std::string_view kPrefix = "appmanifest_";
+    static constexpr std::string_view kSuffix = ".acf";
+    if (!filename.starts_with(kPrefix) || !filename.ends_with(kSuffix)) {
         return {};
     }
-    return filename.substr(k_prefix.size(), filename.size() - k_prefix.size() - k_suffix.size());
+    return filename.substr(kPrefix.size(), filename.size() - kPrefix.size() - kSuffix.size());
 }
 
 std::string read_manifest_value(const fs::path& manifest, const std::regex& pattern) {
@@ -81,7 +81,7 @@ std::vector<SteamGame> SteamService::installed_games() const {
 std::string SteamService::install_dir_for_app(const std::string& app_id) const {
     static const std::regex install_dir_re(R"rx("installdir"\s+"([^"]+)")rx", std::regex::icase);
 
-    const std::string trimmed = gui_util::trim(app_id);
+    const std::string trimmed = proton_inject::trim(app_id);
     if (trimmed.empty()) {
         return {};
     }

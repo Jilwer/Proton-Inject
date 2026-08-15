@@ -134,7 +134,6 @@ std::expected<InjectOptions, std::string> build_options(AppConfig& config, const
 
 std::expected<void, std::string> run_cli(int argc, char** argv) {
     CLI::App app{"proton-inject - DLL injection for Proton games"};
-    app.allow_extras(true);
 
     std::string app_id;
     std::string exe;
@@ -213,20 +212,23 @@ std::expected<void, std::string> run_cli(int argc, char** argv) {
     }
 
     if (!profile_new.empty()) {
-        const bool use_loader = dll.empty();
-        const std::string* app_id_ptr = app_id.empty() ? nullptr : &app_id;
-        const std::string* dll_ptr = dll.empty() ? nullptr : &dll;
-        if (const auto err =
-                store->create_profile(profile_new, app_id_ptr, exe, dll_ptr, use_loader);
-            !err) {
+        AppConfig fresh;
+        fresh.target_exe = exe;
+        fresh.use_loader = dll.empty();
+        if (!app_id.empty()) {
+            fresh.app_id = app_id;
+        }
+        if (!dll.empty()) {
+            fresh.dll_path = dll;
+        }
+        if (const auto err = store->create_profile(profile_new, fresh); !err) {
             return err;
         }
         std::cout << "Profile \"" << profile_new << "\" created successfully\n";
         return {};
     }
 
-    const std::string* profile_name = profile.empty() ? nullptr : &profile;
-    auto config = store->load(profile_name);
+    auto config = profile.empty() ? store->load_default() : store->load_profile(profile);
     if (!config) {
         return std::unexpected(config.error());
     }
@@ -243,7 +245,8 @@ std::expected<void, std::string> run_cli(int argc, char** argv) {
     if (app.count("--method") > 0) {
         const auto normalized = normalize_method(method);
         if (!valid_method(normalized)) {
-            return std::unexpected("Invalid method \"" + method + "\" (want: crt, apc, nt, liatll)");
+            return std::unexpected("Invalid method \"" + method +
+                                   "\" (want: crt, apc, nt, liatll)");
         }
         config->method = normalized;
     }
@@ -279,11 +282,12 @@ std::expected<void, std::string> run_cli(int argc, char** argv) {
     if (options->use_loader) {
         config->dll_path = std::nullopt;
     }
-    if (const auto err = store->save(*config, profile_name); !err) {
+    if (const auto err =
+            profile.empty() ? store->save_default(*config) : store->save_profile(profile, *config);
+        !err) {
         return err;
     }
 
-    options->target_args = app.remaining();
     Injector injector;
     return injector.inject_with(*options);
 }

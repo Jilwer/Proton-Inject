@@ -1,5 +1,6 @@
 #include "cli/cli.hpp"
 #include "gui/application.hpp"
+#include "utils/utils.hpp"
 
 #include <iostream>
 #include <string_view>
@@ -21,6 +22,8 @@ bool wants_gui(int argc, char** argv) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    proton_inject::migrate_legacy_state_dir();
+
     if (wants_gui(argc, argv)) {
         return proton_inject::run_gui(argc, argv);
     }
