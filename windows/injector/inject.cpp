@@ -1,10 +1,10 @@
 #include "inject.hpp"
 
-#include "procutil.hpp"
 #include "remote_module.hpp"
 
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifndef NTSTATUS
@@ -34,10 +34,132 @@ std::string dll_path_ansi(const fs::path& dll_path) {
     return std::string(buffer.data(), buffer.size() - 1);
 }
 
-bool prepare_loadlibrary_a(const HANDLE process, const fs::path& dll_path, void** load_library,
-                           void** remote_path) {
-    *load_library = remote_proc(process, L"kernel32.dll", "LoadLibraryA");
-    if (*load_library == nullptr) {
+// the page holding the DLL path stays committed for the lifetime of the injection: an APC
+// runs long after this returns, so the caller cannot free it on the way out.
+class RemoteString {
+public:
+    RemoteString(HANDLE process, const std::string& text) : process_(process) {
+        const SIZE_T size = text.size() + 1;
+        address_ = VirtualAllocEx(process, nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (address_ == nullptr) {
+            return;
+        }
+        if (!WriteProcessMemory(process, address_, text.c_str(), size, nullptr)) {
+            release();
+        }
+    }
+
+    RemoteString(const RemoteString&) = delete;
+    RemoteString& operator=(const RemoteString&) = delete;
+
+    ~RemoteString() { release(); }
+
+    [[nodiscard]] void* address() const { return address_; }
+
+    explicit operator bool() const { return address_ != nullptr; }
+
+    // hands ownership to the target process, for paths that outlive this scope.
+    void* leak() { return std::exchange(address_, nullptr); }
+
+private:
+    void release() {
+        if (address_ != nullptr) {
+            VirtualFreeEx(process_, address_, 0, MEM_RELEASE);
+            address_ = nullptr;
+        }
+    }
+
+    HANDLE process_ = nullptr;
+    void* address_ = nullptr;
+};
+
+bool inject_crt(const HANDLE process, void* load_library, const RemoteString& path) {
+    const UniqueHandle thread(CreateRemoteThread(
+        process, nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(load_library), path.address(),
+        0, nullptr));
+    if (!thread) {
+        return false;
+    }
+
+    WaitForSingleObject(thread.get(), INFINITE);
+    DWORD exit_code = 0;
+    GetExitCodeThread(thread.get(), &exit_code);
+    return exit_code != 0;
+}
+
+bool inject_apc(const HANDLE thread, void* load_library, RemoteString& path) {
+    const auto apc = reinterpret_cast<PAPCFUNC>(load_library);
+    if (QueueUserAPC(apc, thread, reinterpret_cast<ULONG_PTR>(path.address())) == 0) {
+        return false;
+    }
+    // the APC has not run yet, so the path must survive this scope.
+    path.leak();
+    return true;
+}
+
+bool inject_nt(const HANDLE process, void* load_library, const RemoteString& path) {
+    const auto nt_create = reinterpret_cast<NtCreateThreadExFn>(reinterpret_cast<void*>(
+        GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtCreateThreadEx")));
+    if (nt_create == nullptr) {
+        return false;
+    }
+
+    HANDLE raw_thread = nullptr;
+    const LONG status = nt_create(&raw_thread, 0x001F03FF, nullptr, process, load_library,
+                                  path.address(), 0, 0, 0, 0, nullptr);
+    const UniqueHandle thread(raw_thread);
+    if (status != 0 || !thread) {
+        return false;
+    }
+
+    WaitForSingleObject(thread.get(), INFINITE);
+    DWORD exit_code = 0;
+    GetExitCodeThread(thread.get(), &exit_code);
+    return exit_code != 0;
+}
+
+}  // namespace
+
+std::optional<ApcThread> ApcThread::prepare(const DWORD pid) {
+    const auto tid = find_main_thread(pid);
+    if (!tid.has_value()) {
+        return std::nullopt;
+    }
+
+    UniqueHandle thread(OpenThread(
+        THREAD_SUSPEND_RESUME | THREAD_SET_CONTEXT | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION,
+        FALSE, *tid));
+    if (!thread) {
+        return std::nullopt;
+    }
+    if (SuspendThread(thread.get()) == static_cast<DWORD>(-1)) {
+        return std::nullopt;
+    }
+    return ApcThread(std::move(thread));
+}
+
+ApcThread& ApcThread::operator=(ApcThread&& other) noexcept {
+    if (this != &other) {
+        resume();
+        thread_ = std::move(other.thread_);
+    }
+    return *this;
+}
+
+ApcThread::~ApcThread() {
+    resume();
+}
+
+void ApcThread::resume() {
+    if (thread_ && ResumeThread(thread_.get()) == static_cast<DWORD>(-1)) {
+        std::fprintf(stderr, "Warning: failed to resume APC thread\n");
+    }
+}
+
+bool inject_dll(const HANDLE process, const HANDLE apc_thread, const fs::path& dll_path,
+                const Method method) {
+    void* load_library = remote_proc(process, L"kernel32.dll", "LoadLibraryA");
+    if (load_library == nullptr) {
         return false;
     }
 
@@ -46,142 +168,20 @@ bool prepare_loadlibrary_a(const HANDLE process, const fs::path& dll_path, void*
         return false;
     }
 
-    const SIZE_T size = ansi_path.size() + 1;
-    *remote_path = VirtualAllocEx(process, nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (*remote_path == nullptr) {
-        return false;
-    }
-    if (!WriteProcessMemory(process, *remote_path, ansi_path.c_str(), size, nullptr)) {
-        VirtualFreeEx(process, *remote_path, 0, MEM_RELEASE);
-        *remote_path = nullptr;
-        return false;
-    }
-    return true;
-}
-
-bool inject_crt(const HANDLE process, const fs::path& dll_path) {
-    void* load_library = nullptr;
-    void* remote_path = nullptr;
-    if (!prepare_loadlibrary_a(process, dll_path, &load_library, &remote_path)) {
+    RemoteString path(process, ansi_path);
+    if (!path) {
         return false;
     }
 
-    const HANDLE thread = CreateRemoteThread(process, nullptr, 0,
-                                             reinterpret_cast<LPTHREAD_START_ROUTINE>(load_library),
-                                             remote_path, 0, nullptr);
-    if (thread == nullptr) {
-        VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);
-        return false;
-    }
-
-    WaitForSingleObject(thread, INFINITE);
-    DWORD exit_code = 0;
-    GetExitCodeThread(thread, &exit_code);
-    CloseHandle(thread);
-    VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);
-    return exit_code != 0;
-}
-
-bool inject_apc(const HANDLE process, const HANDLE thread, const fs::path& dll_path) {
-    void* load_library = nullptr;
-    void* remote_path = nullptr;
-    if (!prepare_loadlibrary_a(process, dll_path, &load_library, &remote_path)) {
-        return false;
-    }
-
-    const auto apc = reinterpret_cast<PAPCFUNC>(load_library);
-    if (QueueUserAPC(apc, thread, reinterpret_cast<ULONG_PTR>(remote_path)) == 0) {
-        VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);
-        return false;
-    }
-    return true;
-}
-
-bool inject_nt(const HANDLE process, const fs::path& dll_path) {
-    void* load_library = nullptr;
-    void* remote_path = nullptr;
-    if (!prepare_loadlibrary_a(process, dll_path, &load_library, &remote_path)) {
-        return false;
-    }
-
-    const auto nt_create = reinterpret_cast<NtCreateThreadExFn>(
-        GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtCreateThreadEx"));
-    if (nt_create == nullptr) {
-        VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);
-        return false;
-    }
-
-    HANDLE remote_thread = nullptr;
-    const LONG status = nt_create(&remote_thread, 0x001F03FF, nullptr, process, load_library,
-                                  remote_path, 0, 0, 0, 0, nullptr);
-    if (status != 0 || remote_thread == nullptr) {
-        VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);
-        return false;
-    }
-
-    WaitForSingleObject(remote_thread, INFINITE);
-    DWORD exit_code = 0;
-    GetExitCodeThread(remote_thread, &exit_code);
-    CloseHandle(remote_thread);
-    VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);
-    return exit_code != 0;
-}
-
-}  // namespace
-
-bool inject_dll(const HANDLE process, HANDLE thread, DWORD /*pid*/, const fs::path& dll_path,
-                const Method method) {
     switch (method) {
         case Method::Apc:
-            if (thread == nullptr) {
-                return false;
-            }
-            return inject_apc(process, thread, dll_path);
+            return apc_thread != nullptr && inject_apc(apc_thread, load_library, path);
         case Method::Nt:
-            return inject_nt(process, dll_path);
+            return inject_nt(process, load_library, path);
         case Method::Crt:
-        default:
-            return inject_crt(process, dll_path);
+            return inject_crt(process, load_library, path);
     }
-}
-
-bool prepare_apc_thread(const DWORD pid, const HANDLE existing_thread, HANDLE* thread, bool* owned,
-                        bool* suspended) {
-    if (existing_thread != nullptr) {
-        if (!suspend_thread(existing_thread)) {
-            return false;
-        }
-        *thread = existing_thread;
-        *owned = false;
-        *suspended = true;
-        return true;
-    }
-
-    const auto tid = find_main_thread(pid);
-    if (!tid.has_value()) {
-        return false;
-    }
-    *thread = open_thread_for_apc(*tid);
-    if (*thread == nullptr) {
-        return false;
-    }
-    if (!suspend_thread(*thread)) {
-        CloseHandle(*thread);
-        *thread = nullptr;
-        return false;
-    }
-    *owned = true;
-    *suspended = true;
-    return true;
-}
-
-void finish_apc_thread(const HANDLE thread, const bool owned, const bool suspended) {
-    if (suspended && !resume_thread(thread)) {
-        std::fprintf(stderr, "Warning: failed to resume APC thread\n");
-    }
-    if (owned) {
-        CloseHandle(thread);
-    }
+    return false;
 }
 
 }  // namespace injector

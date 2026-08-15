@@ -30,13 +30,13 @@ Mode parse_mode(const std::string_view value, const Mode fallback) {
     std::transform(normalized.begin(), normalized.end(), normalized.begin(),
                    [](const unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-    if (normalized == "alloc" || normalized == "allocate" || normalized == "new") {
+    if (normalized == "alloc") {
         return Mode::Alloc;
     }
-    if (normalized == "attach" || normalized == "existing" || normalized == "reuse") {
+    if (normalized == "attach") {
         return Mode::Attach;
     }
-    if (normalized == "none" || normalized == "off" || normalized == "disabled") {
+    if (normalized == "none") {
         return Mode::None;
     }
     return fallback;

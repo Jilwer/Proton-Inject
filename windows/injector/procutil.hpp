@@ -5,40 +5,56 @@
 #include <filesystem>
 #include <optional>
 #include <string>
-#include <vector>
 
 namespace injector {
 
-[[nodiscard]] bool enable_se_debug_privilege();
-[[nodiscard]] std::filesystem::path resolve_module_path(const std::string& module);
-[[nodiscard]] HANDLE open_process_for_inject(DWORD pid);
-[[nodiscard]] DWORD get_process_id_by_name(const std::string& name);
-[[nodiscard]] DWORD get_process_id_for_inject(const std::string& name);
-[[nodiscard]] std::optional<DWORD> find_main_thread(DWORD pid);
-[[nodiscard]] HANDLE open_thread_for_apc(DWORD tid);
-[[nodiscard]] bool suspend_thread(HANDLE thread);
-[[nodiscard]] bool resume_thread(HANDLE thread);
-[[nodiscard]] bool process_still_running(HANDLE process);
-[[nodiscard]] DWORD process_exit_code(HANDLE process);
-[[nodiscard]] std::optional<std::pair<FILETIME, FILETIME>> process_times(HANDLE process);
-[[nodiscard]] std::filesystem::path process_image_path(DWORD pid);
-[[nodiscard]] void* get_module_base_address(HANDLE process, const std::filesystem::path& dll_path);
-[[nodiscard]] bool wait_for_kernel32(HANDLE process, DWORD timeout_ms);
-[[nodiscard]] void* local_proc(const char* module, const char* function_name);
+// every injection path has several early returns; without this each one has to remember its
+// own CloseHandle.
+class UniqueHandle {
+public:
+    UniqueHandle() = default;
 
-struct ChildCandidate {
-    DWORD pid = 0;
-    FILETIME start_time{};
-    std::filesystem::path exe_path;
-    std::string exe_name;
+    explicit UniqueHandle(HANDLE handle)
+        : handle_(handle == INVALID_HANDLE_VALUE ? nullptr : handle) {}
+
+    UniqueHandle(const UniqueHandle&) = delete;
+    UniqueHandle& operator=(const UniqueHandle&) = delete;
+
+    UniqueHandle(UniqueHandle&& other) noexcept : handle_(other.handle_) {
+        other.handle_ = nullptr;
+    }
+
+    UniqueHandle& operator=(UniqueHandle&& other) noexcept {
+        if (this != &other) {
+            reset();
+            handle_ = other.handle_;
+            other.handle_ = nullptr;
+        }
+        return *this;
+    }
+
+    ~UniqueHandle() { reset(); }
+
+    [[nodiscard]] HANDLE get() const { return handle_; }
+
+    explicit operator bool() const { return handle_ != nullptr; }
+
+private:
+    void reset() {
+        if (handle_ != nullptr) {
+            CloseHandle(handle_);
+            handle_ = nullptr;
+        }
+    }
+
+    HANDLE handle_ = nullptr;
 };
 
-[[nodiscard]] std::vector<ChildCandidate> list_children(DWORD parent_pid);
-[[nodiscard]] std::optional<DWORD> select_follow_candidate(DWORD parent_pid,
-                                                           const std::filesystem::path& parent_exe,
-                                                           const FILETIME* ref_time,
-                                                           const char* follow_name);
-[[nodiscard]] std::optional<DWORD> find_descendant_by_name(DWORD ancestor_pid,
-                                                           const std::string& name);
+[[nodiscard]] bool enable_se_debug_privilege();
+[[nodiscard]] std::filesystem::path resolve_module_path(const std::string& module);
+[[nodiscard]] UniqueHandle open_process_for_inject(DWORD pid);
+[[nodiscard]] DWORD get_process_id_for_inject(const std::string& name);
+[[nodiscard]] std::optional<DWORD> find_main_thread(DWORD pid);
+[[nodiscard]] bool wait_for_kernel32(HANDLE process, DWORD timeout_ms);
 
 }  // namespace injector

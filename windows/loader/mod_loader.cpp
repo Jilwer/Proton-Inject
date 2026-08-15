@@ -183,7 +183,7 @@ void attach(HINSTANCE instance) {
 }
 
 void detach() {
-    MessageBoxA(nullptr, "Proton-Inject Loader Detached", "Loader", MB_OK);
+    console::write_line("Mod system shutting down");
 }
 
 }  // namespace loader

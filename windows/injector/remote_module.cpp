@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <string>
 #include <tlhelp32.h>
 #include <vector>
 
@@ -63,8 +62,10 @@ HMODULE find_remote_module_peb(const HANDLE process, const wchar_t* module_name)
         return nullptr;
     }
 
+    // via void*: a direct FARPROC-to-signature cast is what -Wcast-function-type objects to,
+    // and GetProcAddress has no typed form.
     const auto nt_query = reinterpret_cast<NtQueryInformationProcessFn>(
-        GetProcAddress(ntdll, "NtQueryInformationProcess"));
+        reinterpret_cast<void*>(GetProcAddress(ntdll, "NtQueryInformationProcess")));
     if (nt_query == nullptr) {
         return nullptr;
     }
