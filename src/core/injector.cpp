@@ -10,9 +10,10 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cerrno>
+#include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <random>
@@ -33,53 +34,9 @@ namespace proton_inject {
 
 namespace {
 
-bool is_proton_dir(const std::string& dir) {
-    if (dir.empty()) {
-        return false;
-    }
-    std::error_code ec;
-    return fs::is_regular_file(fs::path(dir) / "proton", ec);
-}
-
-std::string exe_name(std::string target) {
-    while (!target.empty() && (target.back() == '/' || target.back() == '\\')) {
-        target.pop_back();
-    }
-    const auto pos = target.find_last_of("/\\");
-    if (pos != std::string::npos) {
-        return target.substr(pos + 1);
-    }
-    return target;
-}
-
-bool is_executable(const fs::path& path) {
-    std::error_code ec;
-    if (!fs::exists(path, ec) || fs::is_directory(path, ec)) {
-        return false;
-    }
-    return ::access(path.c_str(), X_OK) == 0;
-}
-
-std::string find_in_path(std::string_view name) {
-    if (is_executable(name)) {
-        return std::string(name);
-    }
-
-    const char* path_env = std::getenv("PATH");
-    if (path_env == nullptr) {
-        return {};
-    }
-
-    std::stringstream path_stream(path_env);
-    std::string directory;
-    while (std::getline(path_stream, directory, ':')) {
-        const auto candidate = fs::path(directory) / name;
-        if (is_executable(candidate)) {
-            return candidate.string();
-        }
-    }
-    return {};
-}
+// Steam and umu both hand off to a launcher chain, so the game's own process shows up well
+// after the command returns.
+constexpr int kProcessWaitSeconds = 30;
 
 std::expected<std::string, std::string> validate_launch_target(const std::string& target) {
     std::error_code ec;
@@ -104,30 +61,16 @@ std::string find_executable_under(const fs::path& game_dir, const std::string& t
         return *resolved;
     }
 
-    const auto wanted = [&]() {
-        const auto pos = relative.find_last_of('/');
-        const auto base = pos == std::string::npos ? relative : relative.substr(pos + 1);
-        std::string lower = base;
-        std::transform(lower.begin(), lower.end(), lower.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        return lower;
-    }();
+    const auto wanted = to_lower(exe_basename(relative));
 
-    std::string found;
+    std::error_code ec;
     for (const auto& entry : fs::recursive_directory_iterator(
-             game_dir, fs::directory_options::skip_permission_denied)) {
-        if (!entry.is_regular_file()) {
-            continue;
-        }
-        auto name = entry.path().filename().string();
-        std::transform(name.begin(), name.end(), name.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        if (name == wanted) {
-            found = entry.path().string();
-            break;
+             game_dir, fs::directory_options::skip_permission_denied, ec)) {
+        if (entry.is_regular_file() && to_lower(entry.path().filename().string()) == wanted) {
+            return entry.path().string();
         }
     }
-    return found;
+    return {};
 }
 
 std::string resolve_steam_launch_target(const std::string& app_id, const std::string& target) {
@@ -157,11 +100,12 @@ std::expected<void, std::string> write_embedded_file(const fs::path& path,
                                                      fs::perms permissions) {
     std::ofstream output(path, std::ios::binary);
     if (!output) {
-        return std::unexpected("Failed to write embedded file to " + path.string());
+        return std::unexpected("Failed to create " + path.string() + ": " + std::strerror(errno));
     }
     output.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(size));
     if (!output) {
-        return std::unexpected("Failed to write embedded file to " + path.string());
+        return std::unexpected("Failed to write " + std::to_string(size) + " bytes to " +
+                               path.string() + ": " + std::strerror(errno));
     }
     std::error_code ec;
     fs::permissions(path, permissions, ec);
@@ -500,7 +444,7 @@ std::vector<std::string> build_injector_args(const InjectOptions& options,
 
     // both Steam and non-Steam attach to an already-running game process.
     args.push_back("-n");
-    args.push_back(exe_name(options.target_exe));
+    args.push_back(exe_basename(options.target_exe));
     args.push_back("-i");
     args.push_back(dll_arg);
 
@@ -509,10 +453,6 @@ std::vector<std::string> build_injector_args(const InjectOptions& options,
     if (options.sleep_ms > 0) {
         args.push_back("--sleep");
         args.push_back(std::to_string(options.sleep_ms));
-    }
-    if (!options.target_args.empty()) {
-        args.push_back("--");
-        args.insert(args.end(), options.target_args.begin(), options.target_args.end());
     }
     return args;
 }
@@ -600,9 +540,10 @@ std::expected<void, std::string> Injector::inject_with(const InjectOptions& opti
 std::expected<void, std::string> Injector::run_iat(const InjectOptions& options,
                                                    const std::string& target_dll) const {
     debug("Waiting for game process to be ready...");
-    if (!wait_for_process(exe_name(options.target_exe), 30)) {
-        return std::unexpected("Game process not ready: process " + exe_name(options.target_exe) +
-                               " not found within 30s");
+    if (!wait_for_process(options.target_exe)) {
+        return std::unexpected("Game process not ready: process " +
+                               exe_basename(options.target_exe) + " not found within " +
+                               std::to_string(kProcessWaitSeconds) + "s");
     }
     debug("Game process is ready");
 
@@ -659,9 +600,10 @@ std::expected<void, std::string> Injector::run_steam(
     args.insert(args.end(), injector_args.begin(), injector_args.end());
 
     debug("Waiting for game process to be ready...");
-    if (!wait_for_process(exe_name(options.target_exe), 30)) {
-        return std::unexpected("Game process not ready: process " + exe_name(options.target_exe) +
-                               " not found within 30s");
+    if (!wait_for_process(options.target_exe)) {
+        return std::unexpected("Game process not ready: process " +
+                               exe_basename(options.target_exe) + " not found within " +
+                               std::to_string(kProcessWaitSeconds) + "s");
     }
     debug("Game process is ready");
 
@@ -731,9 +673,7 @@ std::expected<void, std::string> Injector::run_umu(
 
     auto prefix = expand_path(options.wine_prefix);
     if (prefix.empty()) {
-        if (const char* home = std::getenv("HOME"); home != nullptr) {
-            prefix = std::string(home) + "/.proton-inject/pfx";
-        }
+        prefix = default_wine_prefix();
     }
     std::error_code ec;
     fs::create_directories(prefix, ec);
@@ -747,9 +687,10 @@ std::expected<void, std::string> Injector::run_umu(
     }
 
     debug("Waiting for game process to be ready...");
-    if (!wait_for_process(exe_name(options.target_exe), 30)) {
-        return std::unexpected("Game process not ready: process " + exe_name(options.target_exe) +
-                               " not found within 30s");
+    if (!wait_for_process(options.target_exe)) {
+        return std::unexpected("Game process not ready: process " +
+                               exe_basename(options.target_exe) + " not found within " +
+                               std::to_string(kProcessWaitSeconds) + "s");
     }
     debug("Game process is ready");
 
@@ -768,56 +709,14 @@ std::expected<void, std::string> Injector::run_umu(
                        {"PROTONPATH=" + proton_path, "WINEPREFIX=" + prefix, "GAMEID=" + game_id});
 }
 
-bool Injector::wait_for_process(const std::string& process_name, const int timeout_seconds) const {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds);
+bool Injector::wait_for_process(const std::string& process_name) const {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(kProcessWaitSeconds);
     while (std::chrono::steady_clock::now() < deadline) {
         if (is_process_running(process_name)) {
             return true;
         }
         std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
-    return false;
-}
-
-bool Injector::is_process_running(const std::string& process_name) const {
-    const auto want = [&]() {
-        std::string lower = exe_name(process_name);
-        std::transform(lower.begin(), lower.end(), lower.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        return lower;
-    }();
-
-    std::error_code ec;
-    for (const auto& entry : fs::directory_iterator("/proc", ec)) {
-        if (ec || !entry.is_directory()) {
-            continue;
-        }
-        const auto pid_name = entry.path().filename().string();
-        if (pid_name.empty() || !std::isdigit(static_cast<unsigned char>(pid_name.front()))) {
-            continue;
-        }
-
-        std::ifstream cmdline(entry.path() / "cmdline", std::ios::binary);
-        if (!cmdline) {
-            continue;
-        }
-        std::string raw((std::istreambuf_iterator<char>(cmdline)),
-                        std::istreambuf_iterator<char>());
-        for (char& ch : raw) {
-            if (ch == '\0') {
-                ch = ' ';
-            }
-        }
-        std::istringstream fields(raw);
-        std::string field;
-        while (fields >> field) {
-            auto candidate = exe_name(field);
-            std::transform(candidate.begin(), candidate.end(), candidate.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (candidate == want) {
-                return true;
-            }
-        }
     }
     return false;
 }
