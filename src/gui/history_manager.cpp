@@ -195,4 +195,10 @@ void HistoryManager::save(const InjectionConfig& config) {
         return;
     }
     output << all.dump(2) << '\n';
+    output.close();
+
+    // only once the replacement is on disk, so a failed write cannot lose the history.
+    if (output) {
+        fs::remove(legacy_history_path(), ec);
+    }
 }
