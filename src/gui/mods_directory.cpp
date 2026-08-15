@@ -1,39 +1,23 @@
 #include "mods_directory.hpp"
 
-#include "gui_util.hpp"
-
 #include "utils/utils.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <filesystem>
 
 namespace fs = std::filesystem;
 
 namespace {
 
-// the loader writes into the prefix's Documents folder, so the path is the same whether the
-// prefix came from Steam's compatdata or from umu.
-constexpr const char* k_mods_subpath = "drive_c/users/steamuser/Documents/proton-inject-mods";
-
-std::string lowercase(std::string text) {
-    std::transform(text.begin(), text.end(), text.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    return text;
-}
-
-std::string default_prefix() {
-    return gui_util::home_dir() + "/.proton-injector/pfx";
-}
-
 std::string mods_path_in(const std::string& prefix) {
-    return fs::is_directory(prefix) ? prefix + "/" + k_mods_subpath : std::string{};
+    return fs::is_directory(prefix) ? (fs::path(prefix) / proton_inject::kModsSubpath).string()
+                                    : std::string{};
 }
 
 }  // namespace
 
 std::string ModsDirectory::for_app_id(const std::string& app_id) {
-    const std::string trimmed = gui_util::trim(app_id);
+    const std::string trimmed = proton_inject::trim(app_id);
     // an existing folder wins: it says which library the game was actually installed into.
     if (const std::string existing = proton_inject::mods_dir_for_app_id(trimmed);
         !existing.empty()) {
@@ -44,7 +28,7 @@ std::string ModsDirectory::for_app_id(const std::string& app_id) {
 }
 
 std::string ModsDirectory::for_prefix(const std::string& wine_prefix) {
-    return mods_path_in(wine_prefix.empty() ? default_prefix() : wine_prefix);
+    return mods_path_in(wine_prefix.empty() ? proton_inject::default_wine_prefix() : wine_prefix);
 }
 
 std::vector<std::string> ModsDirectory::list_dlls(const std::string& mods_dir) {
@@ -55,12 +39,14 @@ std::vector<std::string> ModsDirectory::list_dlls(const std::string& mods_dir) {
     std::vector<std::string> names;
     for (const auto& entry : fs::recursive_directory_iterator(
              mods_dir, fs::directory_options::skip_permission_denied)) {
-        if (entry.is_regular_file() && lowercase(entry.path().extension().string()) == ".dll") {
+        if (entry.is_regular_file() &&
+            proton_inject::to_lower(entry.path().extension().string()) == ".dll") {
             names.push_back(entry.path().lexically_relative(mods_dir).string());
         }
     }
 
-    std::ranges::sort(names, {}, [](const std::string& name) { return lowercase(name); });
+    std::ranges::sort(names, {},
+                      [](const std::string& name) { return proton_inject::to_lower(name); });
     return names;
 }
 

@@ -1,9 +1,12 @@
 #include "config/config.hpp"
 
+#include "config/config_json.hpp"
+#include "utils/utils.hpp"
+
 #include <algorithm>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
-#include <nlohmann/json.hpp>
 
 namespace fs = std::filesystem;
 
@@ -19,86 +22,63 @@ std::expected<std::string, std::string> default_config_dir() {
     if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg != nullptr && *xdg != '\0') {
         return std::string(xdg) + "/proton-inject";
     }
-    if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
-        return std::string(home) + "/.config/proton-inject";
+    if (const auto home = home_dir(); !home.empty()) {
+        return home + "/.config/proton-inject";
     }
     return std::unexpected("Failed to resolve home directory");
 }
 
-void to_json(nlohmann::json& json, const AppConfig& config) {
-    json = nlohmann::json::object();
-    if (config.app_id) {
-        json["appid"] = *config.app_id;
-    }
-    if (config.target_exe) {
-        json["exe"] = *config.target_exe;
-    }
-    if (config.dll_path) {
-        json["dll_path"] = *config.dll_path;
-    }
-    if (config.use_loader) {
-        json["use_loader"] = *config.use_loader;
-    }
-    if (config.loader_console) {
-        json["loader_console"] = *config.loader_console;
-    }
-    if (config.method) {
-        json["method"] = *config.method;
-    }
-    if (config.non_steam) {
-        json["non_steam"] = *config.non_steam;
-    }
-    if (config.proton_path) {
-        json["proton_path"] = *config.proton_path;
-    }
-    if (config.wine_prefix) {
-        json["wine_prefix"] = *config.wine_prefix;
-    }
-    if (config.game_id) {
-        json["game_id"] = *config.game_id;
-    }
-    if (config.sleep_ms) {
-        json["sleep_ms"] = *config.sleep_ms;
+template<typename T>
+void store(nlohmann::json& json, const char* key, const std::optional<T>& value) {
+    if (value.has_value()) {
+        json[key] = *value;
     }
 }
 
-void from_json(const nlohmann::json& json, AppConfig& config) {
-    if (json.contains("appid")) {
-        config.app_id = json["appid"].get<std::string>();
-    }
-    if (json.contains("exe")) {
-        config.target_exe = json["exe"].get<std::string>();
-    }
-    if (json.contains("dll_path")) {
-        config.dll_path = json["dll_path"].get<std::string>();
-    }
-    if (json.contains("use_loader")) {
-        config.use_loader = json["use_loader"].get<bool>();
-    }
-    if (json.contains("loader_console")) {
-        config.loader_console = json["loader_console"].get<std::string>();
-    }
-    if (json.contains("method")) {
-        config.method = json["method"].get<std::string>();
-    }
-    if (json.contains("non_steam")) {
-        config.non_steam = json["non_steam"].get<bool>();
-    }
-    if (json.contains("proton_path")) {
-        config.proton_path = json["proton_path"].get<std::string>();
-    }
-    if (json.contains("wine_prefix")) {
-        config.wine_prefix = json["wine_prefix"].get<std::string>();
-    }
-    if (json.contains("game_id")) {
-        config.game_id = json["game_id"].get<std::string>();
-    }
-    if (json.contains("sleep_ms")) {
-        config.sleep_ms = json["sleep_ms"].get<std::uint32_t>();
+template<typename T>
+void load(const nlohmann::json& json, const char* key, std::optional<T>& value) {
+    if (const auto it = json.find(key); it != json.end() && !it->is_null()) {
+        value = it->get<T>();
     }
 }
 
 }  // namespace
+
+nlohmann::json config_to_json(const AppConfig& config) {
+    nlohmann::json json = nlohmann::json::object();
+    store(json, "appid", config.app_id);
+    store(json, "exe", config.target_exe);
+    store(json, "dll_path", config.dll_path);
+    store(json, "use_loader", config.use_loader);
+    store(json, "loader_console", config.loader_console);
+    store(json, "method", config.method);
+    store(json, "non_steam", config.non_steam);
+    store(json, "proton_path", config.proton_path);
+    store(json, "wine_prefix", config.wine_prefix);
+    store(json, "game_id", config.game_id);
+    store(json, "sleep_ms", config.sleep_ms);
+    return json;
+}
+
+AppConfig config_from_json(const nlohmann::json& json) {
+    AppConfig config;
+    load(json, "appid", config.app_id);
+    load(json, "exe", config.target_exe);
+    load(json, "dll_path", config.dll_path);
+    load(json, "use_loader", config.use_loader);
+    load(json, "loader_console", config.loader_console);
+    load(json, "method", config.method);
+    load(json, "non_steam", config.non_steam);
+    load(json, "proton_path", config.proton_path);
+    load(json, "wine_prefix", config.wine_prefix);
+    load(json, "game_id", config.game_id);
+    load(json, "sleep_ms", config.sleep_ms);
+
+    if (config.wine_prefix.has_value()) {
+        config.wine_prefix = relocate_legacy_state_path(*config.wine_prefix);
+    }
+    return config;
+}
 
 std::expected<ConfigStore, std::string> ConfigStore::create() {
     const auto config_dir = default_config_dir();
@@ -108,11 +88,6 @@ std::expected<ConfigStore, std::string> ConfigStore::create() {
 
     const auto profiles_dir = fs::path(*config_dir) / "profiles";
     std::error_code ec;
-    fs::create_directories(*config_dir, ec);
-    if (ec) {
-        return std::unexpected("Failed to create config directory " + *config_dir + ": " +
-                               ec.message());
-    }
     fs::create_directories(profiles_dir, ec);
     if (ec) {
         return std::unexpected("Failed to create profiles directory " + profiles_dir.string() +
@@ -124,9 +99,14 @@ std::expected<ConfigStore, std::string> ConfigStore::create() {
 ConfigStore::ConfigStore(std::string config_dir, std::string profiles_dir)
     : config_dir_(std::move(config_dir)), profiles_dir_(std::move(profiles_dir)) {}
 
+std::string ConfigStore::profile_path(const std::string& name) const {
+    return (fs::path(profiles_dir_) / (name + ".json")).string();
+}
+
 std::expected<AppConfig, std::string> ConfigStore::load_file(const std::string& path) const {
     std::ifstream input(path);
     if (!input) {
+        // a config that was never written is an empty one, not a failure.
         if (!fs::exists(path)) {
             return AppConfig{};
         }
@@ -139,83 +119,81 @@ std::expected<AppConfig, std::string> ConfigStore::load_file(const std::string& 
     } catch (const nlohmann::json::exception& ex) {
         return std::unexpected("Failed to parse config file " + path + ": " + ex.what());
     }
-
-    AppConfig config;
-    from_json(json, config);
-    return config;
-}
-
-std::expected<AppConfig, std::string> ConfigStore::load(const std::string* profile_name) const {
-    if (profile_name != nullptr && !profile_name->empty()) {
-        const auto path = fs::path(profiles_dir_) / (*profile_name + ".json");
-        if (!fs::exists(path)) {
-            return std::unexpected(
-                "Profile \"" + *profile_name +
-                "\" does not exist (use --profile-list to see available profiles)");
-        }
-        return load_file(path.string());
+    if (!json.is_object()) {
+        return std::unexpected("Config file " + path + " is not a JSON object");
     }
-    return load_file((fs::path(config_dir_) / "config.json").string());
+    return config_from_json(json);
 }
 
-std::expected<void, std::string> ConfigStore::save(const AppConfig& config,
-                                                   const std::string* profile_name) const {
-    const fs::path path = profile_name != nullptr && !profile_name->empty()
-                              ? fs::path(profiles_dir_) / (*profile_name + ".json")
-                              : fs::path(config_dir_) / "config.json";
-
-    nlohmann::json json;
-    to_json(json, config);
-
+std::expected<void, std::string> ConfigStore::save_file(const std::string& path,
+                                                        const AppConfig& config) const {
     std::ofstream output(path);
     if (!output) {
-        return std::unexpected("Failed to write config file " + path.string());
+        return std::unexpected("Failed to write config file " + path);
     }
-    output << json.dump(2) << '\n';
+    output << config_to_json(config).dump(2) << '\n';
+    if (!output) {
+        return std::unexpected("Failed to write config file " + path);
+    }
     return {};
 }
 
-std::expected<void, std::string> ConfigStore::create_profile(
-    const std::string& name, const std::string* app_id, const std::string& exe,
-    const std::string* dll, const std::optional<bool>& use_loader) const {
-    std::string trimmed = name;
-    while (!trimmed.empty() && std::isspace(static_cast<unsigned char>(trimmed.front()))) {
-        trimmed.erase(trimmed.begin());
+std::expected<AppConfig, std::string> ConfigStore::load_default() const {
+    return load_file((fs::path(config_dir_) / "config.json").string());
+}
+
+std::expected<AppConfig, std::string> ConfigStore::load_profile(const std::string& name) const {
+    const auto path = profile_path(name);
+    if (!fs::exists(path)) {
+        return std::unexpected("Profile \"" + name +
+                               "\" does not exist (use --profile-list to see available profiles)");
     }
-    while (!trimmed.empty() && std::isspace(static_cast<unsigned char>(trimmed.back()))) {
-        trimmed.pop_back();
-    }
+    return load_file(path);
+}
+
+std::expected<void, std::string> ConfigStore::save_default(const AppConfig& config) const {
+    return save_file((fs::path(config_dir_) / "config.json").string(), config);
+}
+
+std::expected<void, std::string> ConfigStore::save_profile(const std::string& name,
+                                                           const AppConfig& config) const {
+    return save_file(profile_path(name), config);
+}
+
+std::expected<void, std::string> ConfigStore::create_profile(const std::string& name,
+                                                             const AppConfig& config) const {
+    const auto trimmed = trim(name);
     if (trimmed.empty()) {
         return std::unexpected("Profile name cannot be empty");
     }
-    if (exe.empty()) {
+    if (!config.target_exe.has_value() || config.target_exe->empty()) {
         return std::unexpected("exe is required when creating a profile");
     }
-
-    const auto profile_path = fs::path(profiles_dir_) / (trimmed + ".json");
-    if (fs::exists(profile_path)) {
-        return std::unexpected("Profile \"" + trimmed + "\" already exists");
-    }
-
-    const bool using_loader = use_loader.value_or(false);
-    if (!using_loader && (dll == nullptr || dll->empty())) {
+    if (!config.use_loader_or_default() &&
+        (!config.dll_path.has_value() || config.dll_path->empty())) {
         return std::unexpected("dll is required when not using embedded loader");
     }
+    if (profile_exists(trimmed)) {
+        return std::unexpected("Profile \"" + trimmed + "\" already exists");
+    }
+    return save_profile(trimmed, config);
+}
 
-    AppConfig config;
-    config.target_exe = exe;
-    if (app_id != nullptr && !app_id->empty()) {
-        config.app_id = *app_id;
+std::expected<void, std::string> ConfigStore::delete_profile(const std::string& name) const {
+    const auto path = profile_path(name);
+    if (!fs::exists(path)) {
+        return std::unexpected("Profile \"" + name + "\" does not exist");
     }
-    if (use_loader.has_value()) {
-        config.use_loader = use_loader;
+    std::error_code ec;
+    fs::remove(path, ec);
+    if (ec) {
+        return std::unexpected("Failed to delete profile: " + ec.message());
     }
-    if (using_loader) {
-        config.dll_path = std::nullopt;
-    } else {
-        config.dll_path = *dll;
-    }
-    return save(config, &trimmed);
+    return {};
+}
+
+bool ConfigStore::profile_exists(const std::string& name) const {
+    return fs::exists(profile_path(name));
 }
 
 std::expected<std::vector<std::string>, std::string> ConfigStore::list_profiles() const {
@@ -243,27 +221,14 @@ std::expected<std::vector<ProfileEntry>, std::string> ConfigStore::list_profiles
     }
 
     std::vector<ProfileEntry> entries;
+    entries.reserve(names->size());
     for (const auto& name : *names) {
-        const auto config = load(&name);
-        if (!config) {
-            continue;
+        // a profile that will not parse is skipped rather than hiding the rest of the list.
+        if (const auto config = load_profile(name); config) {
+            entries.push_back(ProfileEntry{name, *config});
         }
-        entries.push_back(ProfileEntry{name, *config});
     }
     return entries;
-}
-
-std::expected<void, std::string> ConfigStore::delete_profile(const std::string& name) const {
-    const auto profile_path = fs::path(profiles_dir_) / (name + ".json");
-    if (!fs::exists(profile_path)) {
-        return std::unexpected("Profile \"" + name + "\" does not exist");
-    }
-    std::error_code ec;
-    fs::remove(profile_path, ec);
-    if (ec) {
-        return std::unexpected("Failed to delete profile: " + ec.message());
-    }
-    return {};
 }
 
 }  // namespace proton_inject

@@ -8,6 +8,7 @@
 #include "core/console_mode.hpp"
 #include "core/method.hpp"
 #include "proton/proton.hpp"
+#include "utils/utils.hpp"
 #include "version.hpp"
 
 #include <QCheckBox>
@@ -34,8 +35,8 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
-#include <ranges>
 #include <thread>
+#include <utility>
 
 namespace {
 
@@ -45,32 +46,40 @@ constexpr int kMinimumWidth = 500;
 constexpr int kDelayFieldWidth = 80;
 constexpr int kDllListHeight = 64;
 
-// the injector takes the canonical ids; only the labels say which one you get by default.
-constexpr std::array<std::pair<const char*, const char*>, 4> k_methods{
+// the injector and the loader take the canonical ids; the labels only say which one you get
+// by default.
+struct Choice {
+    const char* id;
+    const char* label;
+};
+
+constexpr std::array<Choice, 4> kMethods{
     {{"crt", "crt (default)"}, {"apc", "apc"}, {"nt", "nt"}, {"liatll", "liat+ll"}}};
 
-int method_index(const std::string& method) {
-    const std::string canonical = proton_inject::normalize_method(method);
-    for (int i = 0; i < static_cast<int>(k_methods.size()); ++i) {
-        if (canonical == k_methods[static_cast<std::size_t>(i)].first) {
-            return i;
+constexpr std::array<Choice, 3> kConsoleModes{
+    {{"alloc", "New window"}, {"attach", "Use existing"}, {"none", "Off"}}};
+
+// an id the combo does not offer falls back to the first entry rather than an empty selection.
+template<std::size_t N>
+int index_of(const std::array<Choice, N>& choices, const std::string& id) {
+    for (std::size_t i = 0; i < choices.size(); ++i) {
+        if (id == choices[i].id) {
+            return static_cast<int>(i);
         }
     }
     return 0;
 }
 
-// same shape as the methods: canonical ids for the loader, labels for the reader.
-constexpr std::array<std::pair<const char*, const char*>, 3> k_console_modes{
-    {{"alloc", "New window"}, {"attach", "Use existing"}, {"none", "Off"}}};
+template<std::size_t N>
+const char* id_at(const std::array<Choice, N>& choices, int index) {
+    const auto clamped = static_cast<std::size_t>(std::max(0, index));
+    return clamped < choices.size() ? choices[clamped].id : choices.front().id;
+}
 
-int console_mode_index(const std::string& mode) {
-    const std::string canonical = proton_inject::normalize_console_mode(mode);
-    for (int i = 0; i < static_cast<int>(k_console_modes.size()); ++i) {
-        if (canonical == k_console_modes[static_cast<std::size_t>(i)].first) {
-            return i;
-        }
+void fill_combo(QComboBox& combo, const auto& choices) {
+    for (const Choice& choice : choices) {
+        combo.addItem(QString::fromLatin1(choice.label));
     }
-    return 0;
 }
 
 QString to_qt(const std::string& text) {
@@ -83,7 +92,7 @@ std::string from_qt(const QString& text) {
 
 // directory a path already points into, if it still exists.
 std::string existing_parent_of(const std::string& path) {
-    const std::string trimmed = gui_util::trim(path);
+    const std::string trimmed = proton_inject::trim(path);
     if (trimmed.empty()) {
         return {};
     }
@@ -130,6 +139,12 @@ MainWindow::MainWindow() {
     // must run before the game list is populated, and the failure dialog is deferred so it
     // has a mapped window to attach to.
     const bool steam_found = m_steam.detect_steam();
+
+    if (auto store = proton_inject::ConfigStore::create(); store) {
+        m_store = std::move(*store);
+    } else {
+        m_store_error = store.error();
+    }
 
     setup_ui();
     refresh_profiles();
@@ -259,9 +274,9 @@ QWidget* MainWindow::build_non_steam_fields(std::vector<QLabel*>& captions) {
 
     m_proton_path_entry = make_entry(QStringLiteral("Proton directory"));
 
-    const std::string default_prefix = gui_util::home_dir() + "/.proton-injector/pfx";
-    std::filesystem::create_directories(default_prefix);
-    m_prefix_entry = new QLineEdit(to_qt(default_prefix));
+    // the injector creates the prefix when it is actually used; building a form must not
+    // touch the filesystem.
+    m_prefix_entry = new QLineEdit(to_qt(proton_inject::default_wine_prefix()));
 
     m_game_id_entry = make_entry(QStringLiteral("0"));
 
@@ -320,9 +335,7 @@ void MainWindow::add_injection_group(form::Form& form) {
     form.add(QStringLiteral("Game .exe"), form::make_row({m_exe_entry, exe_browse}));
 
     m_method_combo = new QComboBox;
-    for (const auto& [id, label] : k_methods) {
-        m_method_combo->addItem(QString::fromLatin1(label));
-    }
+    fill_combo(*m_method_combo, kMethods);
     m_method_combo->setToolTip(
         QStringLiteral("crt, apc and nt run the Windows injector inside the prefix, so they need "
                        "the game's Steam or Proton details. liat+ll hooks a game IAT from Linux "
@@ -340,9 +353,7 @@ void MainWindow::add_injection_group(form::Form& form) {
 
     m_loader_console_label = new QLabel(QStringLiteral("Console"));
     m_loader_console_combo = new QComboBox;
-    for (const auto& [id, label] : k_console_modes) {
-        m_loader_console_combo->addItem(QString::fromLatin1(label));
-    }
+    fill_combo(*m_loader_console_combo, kConsoleModes);
     m_loader_console_combo->setToolTip(QStringLiteral(
         "New window allocates a console for the game. Use existing writes into one the game "
         "already has, which is what you want when a mod loader such as BepInEx allocated it "
@@ -383,7 +394,7 @@ void MainWindow::add_injection_group(form::Form& form) {
         const std::string files = dialogs::open_file(
             this, "Select DLL(s)", {{"DLL Files", "dll"}, {"All Files", "*"}}, true);
         const std::vector<std::string> existing = items_of(*m_dll_list);
-        for (const std::string& path : gui_util::split(files, '\n')) {
+        for (const std::string& path : proton_inject::split(files, '\n')) {
             if (path.empty() ||
                 std::find(existing.begin(), existing.end(), path) != existing.end()) {
                 continue;
@@ -464,7 +475,8 @@ QWidget* MainWindow::build_profiles_page() {
         connect(button, &QPushButton::clicked, this, [this, entry, title, filters]() {
             std::string start = existing_parent_of(from_qt(entry->text()));
             if (start.empty()) {
-                start = m_steam.install_dir_for_app(gui_util::trim(from_qt(m_new_app_id->text())));
+                start =
+                    m_steam.install_dir_for_app(proton_inject::trim(from_qt(m_new_app_id->text())));
             }
             const std::string chosen =
                 dialogs::open_file(this, from_qt(title), filters, false, start);
@@ -587,8 +599,8 @@ QWidget* MainWindow::build_about_page() {
 
     layout->addWidget(form::make_heading(QStringLiteral("Proton Inject")));
 
-    auto* version = new QLabel(
-        QStringLiteral("Version %1").arg(QString::fromLatin1(proton_inject::kVersion)));
+    auto* version =
+        new QLabel(QStringLiteral("Version %1").arg(QString::fromLatin1(proton_inject::kVersion)));
     version->setTextInteractionFlags(Qt::TextSelectableByMouse);
     layout->addWidget(version);
 
@@ -617,9 +629,9 @@ QWidget* MainWindow::build_about_page() {
 
     layout->addWidget(form::make_heading(QStringLiteral("Third-party libraries")));
 
-    auto* credits = new QLabel(QStringLiteral(
-        "<a href=\"https://github.com/CLIUtils/CLI11\">CLI11</a> (BSD-3-Clause)<br>"
-        "<a href=\"https://github.com/nlohmann/json\">nlohmann/json</a> (MIT)"));
+    auto* credits = new QLabel(
+        QStringLiteral("<a href=\"https://github.com/CLIUtils/CLI11\">CLI11</a> (BSD-3-Clause)<br>"
+                       "<a href=\"https://github.com/nlohmann/json\">nlohmann/json</a> (MIT)"));
     credits->setOpenExternalLinks(true);
     credits->setTextInteractionFlags(Qt::TextBrowserInteraction);
     layout->addWidget(credits);
@@ -629,7 +641,14 @@ QWidget* MainWindow::build_about_page() {
 }
 
 void MainWindow::refresh_profiles() {
-    const std::vector<std::string> profiles = m_profiles.list_profiles();
+    std::vector<std::string> profiles;
+    if (m_store.has_value()) {
+        if (auto listed = m_store->list_profiles(); listed) {
+            profiles = std::move(*listed);
+        } else {
+            set_status(listed.error());
+        }
+    }
     const QString previous = m_profile_combo->currentText();
 
     {
@@ -657,14 +676,27 @@ void MainWindow::on_profile_combo_changed(int index) {
     load_profile_by_name(from_qt(m_profile_combo->itemText(index)));
 }
 
+const proton_inject::ConfigStore* MainWindow::store_or_report() {
+    if (!m_store.has_value()) {
+        dialogs::alert(this, "Profiles Unavailable", m_store_error);
+        return nullptr;
+    }
+    return &*m_store;
+}
+
 void MainWindow::load_profile_by_name(const std::string& name) {
-    InjectionConfig loaded;
-    if (!m_profiles.load_profile(name, &loaded)) {
-        dialogs::alert(this, "Profile Error", "Failed to load profile: " + name);
+    const auto* store = store_or_report();
+    if (store == nullptr) {
         return;
     }
 
-    apply_config(loaded);
+    const auto loaded = store->load_profile(name);
+    if (!loaded) {
+        dialogs::alert(this, "Profile Error", loaded.error());
+        return;
+    }
+
+    apply_config(from_app_config(*loaded));
     m_selected_profile = name;
 
     {
@@ -688,21 +720,21 @@ void MainWindow::apply_config(const InjectionConfig& config) {
     m_app_id_entry->setText(to_qt(config.app_id));
     m_exe_entry->setText(to_qt(config.exe_path));
     m_use_loader_check->setChecked(config.use_loader);
-    m_loader_console_combo->setCurrentIndex(console_mode_index(config.loader_console));
+    m_loader_console_combo->setCurrentIndex(
+        index_of(kConsoleModes, proton_inject::normalize_console_mode(config.loader_console)));
 
     m_dll_list->clear();
     if (!config.use_loader) {
         set_items(*m_dll_list, config.dll_paths);
     }
 
-    m_method_combo->setCurrentIndex(method_index(config.method));
+    m_method_combo->setCurrentIndex(
+        index_of(kMethods, proton_inject::normalize_method(config.method)));
     m_sleep_entry->setText(config.sleep_ms > 0 ? to_qt(std::to_string(config.sleep_ms))
                                                : QString{});
 
-    const std::string prefix = config.wine_prefix.empty()
-                                   ? gui_util::home_dir() + "/.proton-injector/pfx"
-                                   : config.wine_prefix;
-    m_prefix_entry->setText(to_qt(prefix));
+    m_prefix_entry->setText(to_qt(config.wine_prefix.empty() ? proton_inject::default_wine_prefix()
+                                                             : config.wine_prefix));
     m_game_id_entry->setText(to_qt(config.game_id));
     m_proton_path_entry->setText(
         to_qt(InjectRunner::resolve_proton_executable(config.proton_path)));
@@ -729,17 +761,15 @@ void MainWindow::apply_config(const InjectionConfig& config) {
 InjectionConfig MainWindow::collect_config() const {
     InjectionConfig config;
     config.mode = is_non_steam() ? InjectionMode::NonSteam : InjectionMode::Steam;
-    config.app_id = gui_util::trim(from_qt(m_app_id_entry->text()));
+    config.app_id = proton_inject::trim(from_qt(m_app_id_entry->text()));
     config.game_name = game_name_for(config.app_id);
-    config.exe_path = gui_util::trim(from_qt(m_exe_entry->text()));
+    config.exe_path = proton_inject::trim(from_qt(m_exe_entry->text()));
     config.use_loader = m_use_loader_check->isChecked();
-    config.loader_console = k_console_modes[static_cast<std::size_t>(std::max(
-                                                0, m_loader_console_combo->currentIndex()))]
-                                .first;
+    config.loader_console = id_at(kConsoleModes, m_loader_console_combo->currentIndex());
     config.method = selected_method();
     config.sleep_ms = sleep_ms_value();
-    config.wine_prefix = gui_util::trim(from_qt(m_prefix_entry->text()));
-    config.game_id = gui_util::trim(from_qt(m_game_id_entry->text()));
+    config.wine_prefix = proton_inject::trim(from_qt(m_prefix_entry->text()));
+    config.game_id = proton_inject::trim(from_qt(m_game_id_entry->text()));
     config.proton_path = selected_proton_path();
 
     if (!config.use_loader) {
@@ -774,7 +804,7 @@ std::expected<void, std::string> MainWindow::validate_config() const {
                 "Enter a process name (e.g. Game.exe) or a valid executable path.");
         }
 
-        if (!steam && gui_util::find_executable("umu-run").empty()) {
+        if (!steam && proton_inject::find_in_path("umu-run").empty()) {
             return std::unexpected("umu-run is required for non-Steam games.");
         }
 
@@ -804,6 +834,11 @@ std::expected<void, std::string> MainWindow::validate_config() const {
 }
 
 void MainWindow::save_current_as_profile() {
+    const auto* store = store_or_report();
+    if (store == nullptr) {
+        return;
+    }
+
     const auto valid = validate_config();
     if (!valid) {
         set_status(valid.error());
@@ -811,27 +846,31 @@ void MainWindow::save_current_as_profile() {
     }
 
     const std::string name =
-        gui_util::trim(dialogs::prompt_text(this, "Save as Profile", "Profile name:"));
+        proton_inject::trim(dialogs::prompt_text(this, "Save as Profile", "Profile name:"));
     if (name.empty()) {
         return;
     }
 
-    if (m_profiles.profile_exists(name) &&
+    if (store->profile_exists(name) &&
         !dialogs::confirm(this, "Overwrite Profile",
                           "Profile \"" + name + "\" already exists. Overwrite?", true)) {
         return;
     }
 
-    if (m_profiles.save_profile(name, collect_config())) {
-        set_status("Saved profile: " + name);
-        refresh_profiles();
-        load_profile_by_name(name);
-    } else {
-        dialogs::alert(this, "Save Failed", "Could not save profile.");
+    if (const auto saved = store->save_profile(name, to_app_config(collect_config())); !saved) {
+        dialogs::alert(this, "Save Failed", saved.error());
+        return;
     }
+    set_status("Saved profile: " + name);
+    refresh_profiles();
+    load_profile_by_name(name);
 }
 
 void MainWindow::update_selected_profile() {
+    const auto* store = store_or_report();
+    if (store == nullptr) {
+        return;
+    }
     if (m_selected_profile.empty()) {
         set_status("Select a profile to update.");
         return;
@@ -843,11 +882,12 @@ void MainWindow::update_selected_profile() {
         return;
     }
 
-    if (m_profiles.save_profile(m_selected_profile, collect_config())) {
-        set_status("Updated profile: " + m_selected_profile);
-    } else {
-        dialogs::alert(this, "Update Failed", "Could not update profile.");
+    if (const auto saved = store->save_profile(m_selected_profile, to_app_config(collect_config()));
+        !saved) {
+        dialogs::alert(this, "Update Failed", saved.error());
+        return;
     }
+    set_status("Updated profile: " + m_selected_profile);
 }
 
 void MainWindow::refresh_history_combo() {
@@ -868,13 +908,13 @@ void MainWindow::on_history_combo_changed(int index) {
         return;
     }
 
-    InjectionConfig loaded;
-    if (!m_history.load_entry(index - 1, &loaded)) {
+    auto loaded = m_history.entry_at(static_cast<std::size_t>(index - 1));
+    if (!loaded.has_value()) {
         return;
     }
 
-    loaded.proton_path = InjectRunner::resolve_proton_executable(loaded.proton_path);
-    apply_config(loaded);
+    loaded->proton_path = InjectRunner::resolve_proton_executable(loaded->proton_path);
+    apply_config(*loaded);
     set_status("Loaded recent injection.");
 }
 
@@ -929,7 +969,8 @@ std::string MainWindow::exe_browse_directory() const {
 
     // non-Steam titles live inside the prefix rather than a Steam library.
     if (is_non_steam()) {
-        const std::string drive_c = gui_util::trim(from_qt(m_prefix_entry->text())) + "/drive_c";
+        const std::string drive_c =
+            proton_inject::trim(from_qt(m_prefix_entry->text())) + "/drive_c";
         if (gui_util::path_exists(drive_c)) {
             return drive_c;
         }
@@ -946,7 +987,7 @@ std::string MainWindow::steam_game_install_dir() const {
     const int index = m_game_combo->currentIndex();
     const std::string app_id = index > 0 && static_cast<std::size_t>(index - 1) < m_games.size()
                                    ? m_games[static_cast<std::size_t>(index - 1)].app_id
-                                   : gui_util::trim(from_qt(m_app_id_entry->text()));
+                                   : proton_inject::trim(from_qt(m_app_id_entry->text()));
 
     return app_id.empty() ? std::string{} : m_steam.install_dir_for_app(app_id);
 }
@@ -963,7 +1004,7 @@ void MainWindow::update_resolved_proton() {
         return;
     }
 
-    const std::string app_id = gui_util::trim(from_qt(m_app_id_entry->text()));
+    const std::string app_id = proton_inject::trim(from_qt(m_app_id_entry->text()));
     if (app_id.empty()) {
         m_resolved_proton_path.clear();
         m_proton_label->setText(QStringLiteral("(enter AppID or select a Steam game)"));
@@ -985,7 +1026,7 @@ bool MainWindow::is_non_steam() const {
 }
 
 std::string MainWindow::selected_method() const {
-    return k_methods[static_cast<std::size_t>(std::max(0, m_method_combo->currentIndex()))].first;
+    return id_at(kMethods, m_method_combo->currentIndex());
 }
 
 // Linux IAT methods attach to the game by pid and map the DLL in from Linux, so they never go
@@ -996,7 +1037,7 @@ bool MainWindow::is_linux_iat_method() const {
 
 std::string MainWindow::selected_proton_path() const {
     if (is_non_steam()) {
-        return gui_util::trim(from_qt(m_proton_path_entry->text()));
+        return proton_inject::trim(from_qt(m_proton_path_entry->text()));
     }
     return m_resolved_proton_path;
 }
@@ -1123,7 +1164,7 @@ void MainWindow::add_loader_mod() {
                                                  {{"DLL Files", "dll"}, {"All Files", "*"}}, true);
 
     int added = 0;
-    for (const std::string& path : gui_util::split(files, '\n')) {
+    for (const std::string& path : proton_inject::split(files, '\n')) {
         if (const auto copied = ModsDirectory::add(mods_dir, path); !copied) {
             dialogs::alert(this, "Add Mod Failed", copied.error());
             break;
@@ -1196,22 +1237,25 @@ void MainWindow::on_tab_changed(int index) {
 }
 
 void MainWindow::create_profile_from_tab() {
+    const auto* store = store_or_report();
+    if (store == nullptr) {
+        return;
+    }
+
     InjectionConfig config;
-    config.exe_path = gui_util::trim(from_qt(m_new_exe->text()));
-    config.app_id = gui_util::trim(from_qt(m_new_app_id->text()));
+    config.exe_path = proton_inject::trim(from_qt(m_new_exe->text()));
+    config.app_id = proton_inject::trim(from_qt(m_new_app_id->text()));
     config.use_loader = m_new_use_loader->isChecked();
     if (!config.use_loader) {
-        const std::string dll = gui_util::trim(from_qt(m_new_dll->text()));
+        const std::string dll = proton_inject::trim(from_qt(m_new_dll->text()));
         if (!dll.empty()) {
             config.dll_paths = {dll};
         }
     }
 
-    const std::string name = gui_util::trim(from_qt(m_new_profile_name->text()));
-    if (!m_profiles.create_profile(name, config)) {
-        dialogs::alert(this, "Create Failed",
-                       "Could not create profile. Ensure the name is unique, EXE is set, "
-                       "and a DLL is provided when not using the mod loader.");
+    const std::string name = proton_inject::trim(from_qt(m_new_profile_name->text()));
+    if (const auto created = store->create_profile(name, to_app_config(config)); !created) {
+        dialogs::alert(this, "Create Failed", created.error());
         return;
     }
 
@@ -1224,6 +1268,11 @@ void MainWindow::create_profile_from_tab() {
 }
 
 void MainWindow::delete_selected_profile() {
+    const auto* store = store_or_report();
+    if (store == nullptr) {
+        return;
+    }
+
     const std::string name = selected_text(*m_profile_list);
     if (name.empty()) {
         return;
@@ -1233,8 +1282,8 @@ void MainWindow::delete_selected_profile() {
         return;
     }
 
-    if (!m_profiles.delete_profile(name)) {
-        dialogs::alert(this, "Delete Failed", "Could not delete profile.");
+    if (const auto removed = store->delete_profile(name); !removed) {
+        dialogs::alert(this, "Delete Failed", removed.error());
         return;
     }
 
@@ -1250,7 +1299,12 @@ void MainWindow::delete_selected_profile() {
 }
 
 void MainWindow::open_config_directory() {
-    const std::string dir = ProfileManager::config_directory();
+    const auto* store = store_or_report();
+    if (store == nullptr) {
+        return;
+    }
+
+    const std::string& dir = store->config_dir();
     if (gui_util::open_path(dir)) {
         show_toast("Opened " + dir);
     } else {

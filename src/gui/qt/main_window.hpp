@@ -3,14 +3,16 @@
 #include "history_manager.hpp"
 #include "inject_runner.hpp"
 #include "injection_config.hpp"
-#include "profile_manager.hpp"
 #include "steam_service.hpp"
+
+#include "config/config.hpp"
 
 #include "qt/form.hpp"
 
 #include <QMainWindow>
 
 #include <expected>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -68,6 +70,7 @@ private:
     void open_config_directory();
     void update_action_states();
 
+    [[nodiscard]] const proton_inject::ConfigStore* store_or_report();
     [[nodiscard]] InjectionConfig collect_config() const;
     [[nodiscard]] std::expected<void, std::string> validate_config() const;
     void apply_config(const InjectionConfig& config);
@@ -138,8 +141,11 @@ private:
 
     SteamService m_steam;
     HistoryManager m_history;
-    ProfileManager m_profiles;
     InjectRunner m_runner;
+
+    // absent when the config directory could not be created; the Profiles tab reports why.
+    std::optional<proton_inject::ConfigStore> m_store;
+    std::string m_store_error;
 
     std::string m_selected_profile;
     std::vector<SteamGame> m_games;

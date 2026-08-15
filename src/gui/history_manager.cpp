@@ -1,160 +1,198 @@
 #include "history_manager.hpp"
 
-#include "gui_util.hpp"
+#include "config/config_json.hpp"
+#include "utils/utils.hpp"
 
 #include <chrono>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
 
+namespace fs = std::filesystem;
+
 namespace {
 
-constexpr int k_max_history = 20;
+constexpr std::size_t kMaxHistory = 20;
 
-std::string history_file_path() {
-    return gui_util::home_dir() + "/.proton-injector/history";
+std::string history_path() {
+    const auto state = proton_inject::state_dir();
+    return state.empty() ? std::string{} : state + "/history.json";
 }
 
-std::string mode_to_string(InjectionMode mode) {
-    if (mode == InjectionMode::NonSteam) {
-        return "Non-steam Game (requires umu-run)";
-    }
-    return "Steam Game";
-}
-
-InjectionMode mode_from_string(const std::string& mode) {
-    if (mode.rfind("Non-steam", 0) == 0) {
-        return InjectionMode::NonSteam;
-    }
-    return InjectionMode::Steam;
-}
-
-std::string display_name_for(const InjectionConfig& config) {
-    if (config.mode == InjectionMode::Steam) {
-        return config.game_name;
-    }
-    const std::filesystem::path exe(config.exe_path);
-    return exe.stem().string();
+// pipe-delimited file written by releases up to 1.3.2, read once so the Recent list survives
+// the upgrade. The next save writes history.json instead. Remove after 1.4.
+std::string legacy_history_path() {
+    const auto state = proton_inject::state_dir();
+    return state.empty() ? std::string{} : state + "/history";
 }
 
 std::string current_timestamp() {
-    const auto now = std::chrono::system_clock::now();
-    const std::time_t time = std::chrono::system_clock::to_time_t(now);
-    std::tm tm{};
-    localtime_r(&time, &tm);
+    const std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm local{};
+    localtime_r(&now, &local);
     std::ostringstream stream;
-    stream << std::put_time(&tm, "%Y-%m-%d %H:%M");
+    stream << std::put_time(&local, "%Y-%m-%d %H:%M");
     return stream.str();
+}
+
+std::string label_for(const std::string& timestamp, const std::string& game_name,
+                      const InjectionConfig& config) {
+    const std::string dll = config.use_loader ? "(mod loader)"
+                            : config.dll_paths.empty()
+                                ? std::string{}
+                                : fs::path(config.dll_paths.front()).filename().string();
+    return timestamp + " | " + game_name + " | " + dll;
+}
+
+nlohmann::json read_json_array(const std::string& path) {
+    std::ifstream input(path);
+    if (!input) {
+        return nlohmann::json::array();
+    }
+    nlohmann::json doc;
+    try {
+        input >> doc;
+    } catch (const nlohmann::json::exception&) {
+        return nlohmann::json::array();
+    }
+    return doc.is_array() ? doc : nlohmann::json::array();
+}
+
+nlohmann::json read_legacy_history() {
+    const auto path = legacy_history_path();
+    if (path.empty()) {
+        return nlohmann::json::array();
+    }
+    std::ifstream input(path);
+    if (!input) {
+        return nlohmann::json::array();
+    }
+
+    // timestamp|mode|appid|game|proton|exe|dlls|method|sleep|prefix|use_loader|console
+    enum Field {
+        Timestamp,
+        Mode,
+        AppId,
+        Game,
+        Proton,
+        Exe,
+        Dlls,
+        Method,
+        Sleep,
+        Prefix,
+        Loader,
+        Console
+    };
+
+    nlohmann::json entries = nlohmann::json::array();
+    for (std::string line; std::getline(input, line);) {
+        // positional, so empty fields have to survive the split.
+        const auto parts = proton_inject::split_fields(proton_inject::trim(line), '|');
+        if (parts.size() <= Sleep) {
+            continue;
+        }
+        const auto at = [&parts](Field field) {
+            const auto index = static_cast<std::size_t>(field);
+            return index < parts.size() ? parts[index] : std::string{};
+        };
+
+        const bool use_loader = at(Loader) == "true";
+        proton_inject::AppConfig config;
+        config.target_exe = at(Exe);
+        config.use_loader = use_loader;
+        if (!at(AppId).empty()) {
+            config.app_id = at(AppId);
+        }
+        if (at(Mode).starts_with("Non-steam")) {
+            config.non_steam = true;
+        }
+        if (!at(Proton).empty()) {
+            config.proton_path = at(Proton);
+        }
+        if (!at(Prefix).empty()) {
+            config.wine_prefix = at(Prefix);
+        }
+        if (!at(Method).empty()) {
+            config.method = at(Method);
+        }
+        if (!at(Console).empty()) {
+            config.loader_console = at(Console);
+        }
+        if (!use_loader) {
+            if (const auto dlls = proton_inject::split(at(Dlls), ','); !dlls.empty()) {
+                config.dll_path = dlls.front();
+            }
+        }
+        if (const auto ms = std::atoi(at(Sleep).c_str()); ms > 0) {
+            config.sleep_ms = static_cast<std::uint32_t>(ms);
+        }
+
+        nlohmann::json entry = nlohmann::json::object();
+        entry["timestamp"] = at(Timestamp);
+        entry["game_name"] = at(Game);
+        entry["config"] = proton_inject::config_to_json(config);
+        entries.push_back(std::move(entry));
+    }
+    return entries;
+}
+
+nlohmann::json load_all() {
+    const auto path = history_path();
+    if (path.empty()) {
+        return nlohmann::json::array();
+    }
+    return fs::exists(path) ? read_json_array(path) : read_legacy_history();
 }
 
 }  // namespace
 
 std::vector<HistoryEntry> HistoryManager::entries() const {
     std::vector<HistoryEntry> result;
-    std::ifstream input(history_file_path());
-    if (!input) {
-        return result;
-    }
-
-    std::string line;
-    while (std::getline(input, line)) {
-        line = gui_util::trim(line);
-        if (line.empty()) {
+    for (const auto& raw : load_all()) {
+        if (!raw.is_object() || !raw.contains("config") || !raw["config"].is_object()) {
             continue;
         }
-
-        const std::vector<std::string> parts = gui_util::split(line, '|');
-        if (parts.size() < 9) {
-            continue;
-        }
-
         HistoryEntry entry;
-        const bool use_loader = parts.size() > 10 ? parts[10] == "true" : false;
-        const std::string& dll_field = parts[6];
-        const std::string dll_label = use_loader ? "(mod loader)" : dll_field;
-        entry.label = parts[0] + " | " + parts[3] + " | " + dll_label;
-
-        InjectionConfig config;
-        config.mode = mode_from_string(parts[1]);
-        config.app_id = parts[2];
-        config.game_name = parts[3];
-        config.proton_path = parts[4];
-        config.exe_path = parts[5];
-        config.dll_paths = gui_util::split(dll_field, ',');
-        config.use_loader = use_loader;
-        config.method = parts[7];
-        try {
-            config.sleep_ms = std::stoi(parts[8]);
-        } catch (const std::exception&) {
-            config.sleep_ms = 0;
-        }
-        if (parts.size() > 9) {
-            config.wine_prefix = parts[9];
-        }
-        if (parts.size() > 11 && !parts[11].empty()) {
-            config.loader_console = parts[11];
-        }
-
-        entry.config = config;
+        entry.config = from_app_config(proton_inject::config_from_json(raw["config"]));
+        entry.config.game_name = raw.value("game_name", "");
+        entry.label = label_for(raw.value("timestamp", ""), entry.config.game_name, entry.config);
         result.push_back(std::move(entry));
     }
-
     return result;
 }
 
-bool HistoryManager::load_entry(int index, InjectionConfig* config) const {
-    const std::vector<HistoryEntry> list = entries();
-    if (index < 0 || index >= static_cast<int>(list.size()) || config == nullptr) {
-        return false;
+std::optional<InjectionConfig> HistoryManager::entry_at(std::size_t index) const {
+    const auto list = entries();
+    if (index >= list.size()) {
+        return std::nullopt;
     }
-    *config = list[static_cast<std::size_t>(index)].config;
-    return true;
+    return list[index].config;
 }
 
 void HistoryManager::save(const InjectionConfig& config) {
-    const std::string timestamp = current_timestamp();
-    const std::string dll_csv = gui_util::join(config.dll_paths, ",");
-
-    const std::vector<std::string> fields = {
-        timestamp,
-        mode_to_string(config.mode),
-        config.app_id,
-        display_name_for(config),
-        config.proton_path,
-        config.exe_path,
-        dll_csv,
-        config.method,
-        std::to_string(config.sleep_ms),
-        config.wine_prefix,
-        config.use_loader ? "true" : "false",
-        config.loader_console,
-    };
-
-    std::vector<std::string> lines{gui_util::join(fields, "|")};
-
-    std::ifstream existing(history_file_path());
-    if (existing) {
-        std::string line;
-        while (std::getline(existing, line)) {
-            line = gui_util::trim(line);
-            if (!line.empty()) {
-                lines.push_back(line);
-            }
-        }
-    }
-
-    while (static_cast<int>(lines.size()) > k_max_history) {
-        lines.pop_back();
-    }
-
-    std::filesystem::create_directories(std::filesystem::path(history_file_path()).parent_path());
-    std::ofstream output(history_file_path(), std::ios::trunc);
-    if (!output) {
+    const auto path = history_path();
+    if (path.empty()) {
         return;
     }
 
-    for (const std::string& entry : lines) {
-        output << entry << '\n';
+    nlohmann::json entry = nlohmann::json::object();
+    entry["timestamp"] = current_timestamp();
+    entry["game_name"] = config.game_name;
+    entry["config"] = proton_inject::config_to_json(to_app_config(config));
+
+    nlohmann::json all = load_all();
+    all.insert(all.begin(), std::move(entry));
+    if (all.size() > kMaxHistory) {
+        all.erase(all.begin() + kMaxHistory, all.end());
     }
+
+    std::error_code ec;
+    fs::create_directories(fs::path(path).parent_path(), ec);
+    std::ofstream output(path, std::ios::trunc);
+    if (!output) {
+        return;
+    }
+    output << all.dump(2) << '\n';
 }

@@ -1,7 +1,5 @@
 #include "inject_runner.hpp"
 
-#include "gui_util.hpp"
-
 #include "core/injector.hpp"
 #include "utils/utils.hpp"
 
@@ -10,7 +8,7 @@
 namespace fs = std::filesystem;
 
 std::string InjectRunner::resolve_proton_executable(const std::string& proton_path) {
-    const std::string trimmed = gui_util::trim(proton_path);
+    const std::string trimmed = proton_inject::trim(proton_path);
     if (trimmed.empty()) {
         return {};
     }
@@ -46,7 +44,7 @@ std::string InjectRunner::process_name_from_exe(const std::string& exe_path) {
 }
 
 bool InjectRunner::is_bare_exe_name(const std::string& exe_path) {
-    const std::string trimmed = gui_util::trim(exe_path);
+    const std::string trimmed = proton_inject::trim(exe_path);
     if (trimmed.empty()) {
         return false;
     }
@@ -86,22 +84,33 @@ bool InjectRunner::inject_once(const InjectionConfig& config, const std::string&
     return true;
 }
 
+namespace {
+
+// the callback points at the caller's stack, so it has to be cleared on every path out.
+class ScopedLogCallback {
+public:
+    explicit ScopedLogCallback(const InjectRunner::LogCallback& callback) {
+        proton_inject::g_log_callback = callback;
+    }
+
+    ScopedLogCallback(const ScopedLogCallback&) = delete;
+    ScopedLogCallback& operator=(const ScopedLogCallback&) = delete;
+
+    ~ScopedLogCallback() { proton_inject::g_log_callback = nullptr; }
+};
+
+}  // namespace
+
 bool InjectRunner::run(const InjectionConfig& config, const LogCallback& on_output) {
     m_last_error.clear();
-
-    proton_inject::g_log_callback = on_output;
-
-    const auto finish = [&]() { proton_inject::g_log_callback = nullptr; };
+    const ScopedLogCallback logging(on_output);
 
     if (config.use_loader) {
-        const bool ok = inject_once(config, {});
-        finish();
-        return ok;
+        return inject_once(config, {});
     }
 
     if (config.dll_paths.empty()) {
         m_last_error = "No DLL selected.";
-        finish();
         return false;
     }
 
@@ -110,11 +119,8 @@ bool InjectRunner::run(const InjectionConfig& config, const LogCallback& on_outp
             on_output("Injecting " + dll + "...");
         }
         if (!inject_once(config, dll)) {
-            finish();
             return false;
         }
     }
-
-    finish();
     return true;
 }
