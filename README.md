@@ -67,6 +67,16 @@ Start with `crt`. It has the best Proton/Wine compatibility. See the table above
 The Loader tab's **Add…** copies DLLs in there and **Remove** deletes them, creating the folder on
 the first mod if the loader has not run yet.
 
+### Where does proton-inject keep its own files?
+| Path | Contents |
+| --- | --- |
+| `~/.config/proton-inject/` | `config.json` and `profiles/` |
+| `~/.proton-inject/pfx` | default Wine prefix for non-Steam games |
+| `~/.proton-inject/history.json` | recent injections shown in the GUI |
+
+Versions up to 1.3.2 used `~/.proton-injector` for the last two. It is moved automatically on
+first run of 1.3.3, and saved prefixes pointing at the old name are redirected.
+
 ### Do I need to install it?
 No. It is fully portable, just run the binary. `--install` is there if you want it in your
 application menu.
