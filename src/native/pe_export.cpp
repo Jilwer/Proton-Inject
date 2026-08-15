@@ -98,11 +98,14 @@ bool is_zero_run(const ProcMem& mem, std::uintptr_t addr, std::size_t size) {
     return std::all_of(buf.begin(), buf.end(), [](std::byte b) { return b == std::byte{0}; });
 }
 
-}  // namespace
+struct PeHeaders {
+    std::uintptr_t nt = 0;
+    CoffHeader coff{};
+    uint32_t number_of_rva_and_sizes = 0;
+};
 
-std::expected<std::uintptr_t, std::string> find_pe_export(const ProcMem& mem,
-                                                          std::uintptr_t image_base,
-                                                          std::string_view function_name) {
+std::expected<PeHeaders, std::string> read_pe_headers(const ProcMem& mem,
+                                                      std::uintptr_t image_base) {
     DosHeader dos{};
     if (auto err = read_exact(mem, image_base, &dos, sizeof(dos)); !err) {
         return std::unexpected(err.error());
@@ -111,52 +114,75 @@ std::expected<std::uintptr_t, std::string> find_pe_export(const ProcMem& mem,
         return std::unexpected("Remote image is not a PE (bad DOS header)");
     }
 
-    const std::uintptr_t nt = image_base + static_cast<std::uintptr_t>(dos.e_lfanew);
+    PeHeaders headers;
+    headers.nt = image_base + static_cast<std::uintptr_t>(dos.e_lfanew);
+
     uint32_t signature = 0;
-    if (auto err = read_exact(mem, nt, &signature, sizeof(signature)); !err) {
+    if (auto err = read_exact(mem, headers.nt, &signature, sizeof(signature)); !err) {
         return std::unexpected(err.error());
     }
     if (signature != kPeSignature) {
         return std::unexpected("Remote image is not a PE (bad NT signature)");
     }
 
-    CoffHeader coff{};
-    if (auto err = read_exact(mem, nt + 4, &coff, sizeof(coff)); !err) {
+    if (auto err = read_exact(mem, headers.nt + 4, &headers.coff, sizeof(headers.coff)); !err) {
         return std::unexpected(err.error());
     }
-    if (coff.machine != kMachineAmd64) {
+    if (headers.coff.machine != kMachineAmd64) {
         return std::unexpected("Remote PE is not x86_64 (Linux IAT methods are 64-bit only)");
     }
-    if (coff.size_of_optional_header < kDataDirectoryOffset + sizeof(DataDirectory)) {
+    if (headers.coff.size_of_optional_header < kDataDirectoryOffset + sizeof(DataDirectory)) {
         return std::unexpected("Remote PE optional header is too small");
     }
 
-    uint16_t opt_magic = 0;
-    if (auto err = read_exact(mem, nt + 4 + sizeof(CoffHeader) + kOptionalMagicOffset, &opt_magic,
-                              sizeof(opt_magic));
-        !err) {
+    const std::uintptr_t optional = headers.nt + 4 + sizeof(CoffHeader);
+    uint16_t magic = 0;
+    if (auto err = read_exact(mem, optional + kOptionalMagicOffset, &magic, sizeof(magic)); !err) {
         return std::unexpected(err.error());
     }
-    if (opt_magic != kPe32PlusMagic) {
+    if (magic != kPe32PlusMagic) {
         return std::unexpected("Remote PE is not PE32+");
     }
 
-    uint32_t number_of_rva_and_sizes = 0;
-    if (auto err = read_exact(mem, nt + 4 + sizeof(CoffHeader) + kNumberOfRvaAndSizesOffset,
-                              &number_of_rva_and_sizes, sizeof(number_of_rva_and_sizes));
+    if (auto err =
+            read_exact(mem, optional + kNumberOfRvaAndSizesOffset, &headers.number_of_rva_and_sizes,
+                       sizeof(headers.number_of_rva_and_sizes));
         !err) {
         return std::unexpected(err.error());
     }
-    if (number_of_rva_and_sizes <= kExportDirectoryIndex) {
-        return std::unexpected("Remote PE has no export directory");
+    return headers;
+}
+
+std::expected<DataDirectory, std::string> read_data_directory(const ProcMem& mem,
+                                                              const PeHeaders& headers,
+                                                              uint32_t index) {
+    if (headers.number_of_rva_and_sizes <= index) {
+        return std::unexpected("Remote PE has no data directory entry " + std::to_string(index));
+    }
+    DataDirectory entry{};
+    const std::uintptr_t addr =
+        headers.nt + 4 + sizeof(CoffHeader) + kDataDirectoryOffset + index * sizeof(DataDirectory);
+    if (auto err = read_exact(mem, addr, &entry, sizeof(entry)); !err) {
+        return std::unexpected(err.error());
+    }
+    return entry;
+}
+
+}  // namespace
+
+std::expected<std::uintptr_t, std::string> find_pe_export(const ProcMem& mem,
+                                                          std::uintptr_t image_base,
+                                                          std::string_view function_name) {
+    const auto headers = read_pe_headers(mem, image_base);
+    if (!headers) {
+        return std::unexpected(headers.error());
     }
 
-    DataDirectory export_dir_entry{};
-    if (auto err = read_exact(mem, nt + 4 + sizeof(CoffHeader) + kDataDirectoryOffset,
-                              &export_dir_entry, sizeof(export_dir_entry));
-        !err) {
-        return std::unexpected(err.error());
+    const auto directory = read_data_directory(mem, *headers, kExportDirectoryIndex);
+    if (!directory) {
+        return std::unexpected(directory.error());
     }
+    const DataDirectory export_dir_entry = *directory;
     if (export_dir_entry.virtual_address == 0 || export_dir_entry.size == 0) {
         return std::unexpected("Remote PE export directory is empty");
     }
@@ -215,34 +241,19 @@ std::expected<std::uintptr_t, std::string> find_pe_export(const ProcMem& mem,
 }
 
 std::optional<IatSlot> find_iat_slot(const ProcMem& mem, std::uintptr_t image_base,
-                                     std::string_view import_dll, std::string_view function_name) {
-    DosHeader dos{};
-    if (!read_exact(mem, image_base, &dos, sizeof(dos)) || dos.e_magic != kDosMagic ||
-        dos.e_lfanew <= 0 || dos.e_lfanew > 0x1000) {
+                                     std::string_view function_name) {
+    // probing every mapped image, so a module without a usable import table is an ordinary
+    // outcome rather than an error worth a message.
+    const auto headers = read_pe_headers(mem, image_base);
+    if (!headers) {
         return std::nullopt;
     }
-    const std::uintptr_t nt = image_base + static_cast<std::uintptr_t>(dos.e_lfanew);
-    uint32_t signature = 0;
-    CoffHeader coff{};
-    uint16_t opt_magic = 0;
-    uint32_t number_of_rva_and_sizes = 0;
-    if (!read_exact(mem, nt, &signature, sizeof(signature)) || signature != kPeSignature ||
-        !read_exact(mem, nt + 4, &coff, sizeof(coff)) || coff.machine != kMachineAmd64 ||
-        !read_exact(mem, nt + 4 + sizeof(CoffHeader) + kOptionalMagicOffset, &opt_magic,
-                    sizeof(opt_magic)) ||
-        opt_magic != kPe32PlusMagic ||
-        !read_exact(mem, nt + 4 + sizeof(CoffHeader) + kNumberOfRvaAndSizesOffset,
-                    &number_of_rva_and_sizes, sizeof(number_of_rva_and_sizes)) ||
-        number_of_rva_and_sizes <= kImportDirectoryIndex) {
+    const auto directory = read_data_directory(mem, *headers, kImportDirectoryIndex);
+    if (!directory) {
         return std::nullopt;
     }
-
-    DataDirectory import_dir{};
-    if (!read_exact(mem,
-                    nt + 4 + sizeof(CoffHeader) + kDataDirectoryOffset +
-                        kImportDirectoryIndex * sizeof(DataDirectory),
-                    &import_dir, sizeof(import_dir)) ||
-        import_dir.virtual_address == 0 || import_dir.size < sizeof(ImportDescriptor)) {
+    const DataDirectory import_dir = *directory;
+    if (import_dir.virtual_address == 0 || import_dir.size < sizeof(ImportDescriptor)) {
         return std::nullopt;
     }
 
@@ -256,13 +267,6 @@ std::optional<IatSlot> find_iat_slot(const ProcMem& mem, std::uintptr_t image_ba
         }
         if (desc.name == 0 && desc.first_thunk == 0) {
             break;
-        }
-        char dll_name[64]{};
-        if (!read_exact(mem, image_base + desc.name, dll_name, sizeof(dll_name) - 1)) {
-            continue;
-        }
-        if (!import_dll.empty() && !path_ends_with_ignore_case(dll_name, import_dll)) {
-            continue;
         }
         const uint32_t int_rva =
             desc.original_first_thunk != 0 ? desc.original_first_thunk : desc.first_thunk;
@@ -302,25 +306,17 @@ std::optional<IatSlot> find_iat_slot(const ProcMem& mem, std::uintptr_t image_ba
 
 std::expected<std::vector<SectionCave>, std::string> find_pe_caves(const ProcMem& mem,
                                                                    std::uintptr_t image_base) {
-    DosHeader dos{};
-    if (auto err = read_exact(mem, image_base, &dos, sizeof(dos)); !err) {
-        return std::unexpected(err.error());
+    const auto headers = read_pe_headers(mem, image_base);
+    if (!headers) {
+        return std::unexpected(headers.error());
     }
-    if (dos.e_magic != kDosMagic || dos.e_lfanew <= 0 || dos.e_lfanew > 0x1000) {
-        return std::unexpected("Remote image is not a PE (bad DOS header)");
-    }
-
-    const std::uintptr_t nt = image_base + static_cast<std::uintptr_t>(dos.e_lfanew);
-    CoffHeader coff{};
-    if (auto err = read_exact(mem, nt + 4, &coff, sizeof(coff)); !err) {
-        return std::unexpected(err.error());
-    }
+    const CoffHeader& coff = headers->coff;
     if (coff.number_of_sections == 0 || coff.number_of_sections > 96) {
         return std::unexpected("Remote PE has an invalid section count");
     }
 
     uint32_t section_alignment = 0x1000;
-    if (auto err = read_exact(mem, nt + 4 + sizeof(CoffHeader) + kSectionAlignmentOffset,
+    if (auto err = read_exact(mem, headers->nt + 4 + sizeof(CoffHeader) + kSectionAlignmentOffset,
                               &section_alignment, sizeof(section_alignment));
         !err) {
         return std::unexpected(err.error());
@@ -329,7 +325,8 @@ std::expected<std::vector<SectionCave>, std::string> find_pe_caves(const ProcMem
         section_alignment = 0x1000;
     }
 
-    const std::uintptr_t section_table = nt + 4 + sizeof(CoffHeader) + coff.size_of_optional_header;
+    const std::uintptr_t section_table =
+        headers->nt + 4 + sizeof(CoffHeader) + coff.size_of_optional_header;
     std::vector<SectionHeader> sections(coff.number_of_sections);
     if (auto err = read_exact(mem, section_table, sections.data(),
                               sections.size() * sizeof(SectionHeader));

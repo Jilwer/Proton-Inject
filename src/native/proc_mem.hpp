@@ -20,8 +20,6 @@ struct Mapping {
 
     [[nodiscard]] std::size_t size() const { return end > start ? end - start : 0; }
 
-    [[nodiscard]] bool readable() const { return perms.size() > 0 && perms[0] == 'r'; }
-
     [[nodiscard]] bool writable() const { return perms.size() > 1 && perms[1] == 'w'; }
 
     [[nodiscard]] bool executable() const { return perms.size() > 2 && perms[2] == 'x'; }
@@ -39,8 +37,6 @@ public:
     ~ProcMem();
 
     [[nodiscard]] static std::expected<ProcMem, std::string> open(pid_t pid);
-
-    [[nodiscard]] pid_t pid() const { return pid_; }
 
     [[nodiscard]] std::expected<void, std::string> read(std::uintptr_t addr,
                                                         std::span<std::byte> out) const;
@@ -68,6 +64,7 @@ private:
     pid_t pid_ = -1;
 };
 
+[[nodiscard]] std::string hex_addr(std::uintptr_t addr);
 [[nodiscard]] std::expected<std::vector<Mapping>, std::string> parse_maps(pid_t pid);
 [[nodiscard]] bool path_ends_with_ignore_case(std::string_view path, std::string_view suffix);
 

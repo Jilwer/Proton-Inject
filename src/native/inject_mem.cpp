@@ -10,13 +10,12 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
-#include <ios>
 #include <optional>
 #include <span>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace proton_inject {
@@ -37,14 +36,8 @@ struct IatHook {
     std::string function;
 };
 
-std::string hex_addr(std::uintptr_t addr) {
-    std::ostringstream out;
-    out << "0x" << std::hex << addr;
-    return out.str();
-}
-
-void emit_u8(std::vector<std::uint8_t>& out, std::uint8_t value) {
-    out.push_back(value);
+void emit(std::vector<std::uint8_t>& out, std::initializer_list<std::uint8_t> bytes) {
+    out.insert(out.end(), bytes);
 }
 
 void emit_u64(std::vector<std::uint8_t>& out, std::uint64_t value) {
@@ -54,92 +47,51 @@ void emit_u64(std::vector<std::uint8_t>& out, std::uint64_t value) {
 }
 
 void emit_saved_regs(std::vector<std::uint8_t>& stub) {
-    emit_u8(stub, 0xf3);
-    emit_u8(stub, 0x0f);
-    emit_u8(stub, 0x1e);
-    emit_u8(stub, 0xfa);  // endbr64
-    emit_u8(stub, 0x9c);  // pushfq
-    for (const std::uint8_t op : {0x50, 0x51, 0x52, 0x53, 0x55, 0x56, 0x57}) {
-        emit_u8(stub, op);
-    }
-    emit_u8(stub, 0x41);
-    emit_u8(stub, 0x50);
-    emit_u8(stub, 0x41);
-    emit_u8(stub, 0x51);
-    emit_u8(stub, 0x41);
-    emit_u8(stub, 0x52);
-    emit_u8(stub, 0x41);
-    emit_u8(stub, 0x53);
-    emit_u8(stub, 0x48);
-    emit_u8(stub, 0x89);
-    emit_u8(stub, 0xe5);  // mov rbp, rsp
-    emit_u8(stub, 0x48);
-    emit_u8(stub, 0x83);
-    emit_u8(stub, 0xe4);
-    emit_u8(stub, 0xf0);  // and rsp, -16
-    emit_u8(stub, 0x48);
-    emit_u8(stub, 0x83);
-    emit_u8(stub, 0xec);
-    emit_u8(stub, 0x20);  // sub rsp, 0x20
+    emit(stub, {0xf3, 0x0f, 0x1e, 0xfa});                    // endbr64
+    emit(stub, {0x9c});                                      // pushfq
+    emit(stub, {0x50, 0x51, 0x52, 0x53, 0x55, 0x56, 0x57});  // push rax rcx rdx rbx rbp rsi rdi
+    emit(stub, {0x41, 0x50});                                // push r8
+    emit(stub, {0x41, 0x51});                                // push r9
+    emit(stub, {0x41, 0x52});                                // push r10
+    emit(stub, {0x41, 0x53});                                // push r11
+    emit(stub, {0x48, 0x89, 0xe5});                          // mov rbp, rsp
+    emit(stub, {0x48, 0x83, 0xe4, 0xf0});                    // and rsp, -16
+    emit(stub, {0x48, 0x83, 0xec, 0x20});                    // sub rsp, 0x20
 }
 
 void emit_restore_and_jmp(std::vector<std::uint8_t>& stub, std::uintptr_t original) {
-    emit_u8(stub, 0x48);
-    emit_u8(stub, 0x89);
-    emit_u8(stub, 0xec);  // mov rsp, rbp
-    emit_u8(stub, 0x41);
-    emit_u8(stub, 0x5b);
-    emit_u8(stub, 0x41);
-    emit_u8(stub, 0x5a);
-    emit_u8(stub, 0x41);
-    emit_u8(stub, 0x59);
-    emit_u8(stub, 0x41);
-    emit_u8(stub, 0x58);
-    for (const std::uint8_t op : {0x5f, 0x5e, 0x5d, 0x5b, 0x5a, 0x59, 0x58}) {
-        emit_u8(stub, op);
-    }
-    emit_u8(stub, 0x9d);
-    emit_u8(stub, 0x48);
-    emit_u8(stub, 0xb8);
+    emit(stub, {0x48, 0x89, 0xec});                          // mov rsp, rbp
+    emit(stub, {0x41, 0x5b});                                // pop r11
+    emit(stub, {0x41, 0x5a});                                // pop r10
+    emit(stub, {0x41, 0x59});                                // pop r9
+    emit(stub, {0x41, 0x58});                                // pop r8
+    emit(stub, {0x5f, 0x5e, 0x5d, 0x5b, 0x5a, 0x59, 0x58});  // pop rdi rsi rbp rbx rdx rcx rax
+    emit(stub, {0x9d});                                      // popfq
+    emit(stub, {0x48, 0xb8});                                // movabs rax, original
     emit_u64(stub, original);
-    emit_u8(stub, 0xff);
-    emit_u8(stub, 0xe0);  // jmp original
+    emit(stub, {0xff, 0xe0});  // jmp rax
 }
 
+// the guard at [rbx+8] makes the stub idempotent: the hooked import fires on every frame, and
+// only the first pass may call LoadLibrary.
 std::vector<std::uint8_t> build_iat_stub(std::uintptr_t load_library, std::uintptr_t data,
                                          std::uintptr_t path, std::uintptr_t original) {
+    constexpr std::uint8_t kSkipLoadLibrary = 33;  // bytes from the jne to emit_restore_and_jmp
+
     std::vector<std::uint8_t> stub;
     stub.reserve(128);
     emit_saved_regs(stub);
-    emit_u8(stub, 0x48);
-    emit_u8(stub, 0xbb);
-    emit_u64(stub, data);  // movabs rbx, data
-    emit_u8(stub, 0x48);
-    emit_u8(stub, 0x83);
-    emit_u8(stub, 0x7b);
-    emit_u8(stub, 0x08);
-    emit_u8(stub, 0x00);  // cmp qword [rbx+8], 0
-    emit_u8(stub, 0x75);
-    emit_u8(stub, 33);  // jne skip LoadLibrary
-    emit_u8(stub, 0x48);
-    emit_u8(stub, 0xb9);
-    emit_u64(stub, path);  // movabs rcx, path
-    emit_u8(stub, 0x48);
-    emit_u8(stub, 0xb8);
+    emit(stub, {0x48, 0xbb});  // movabs rbx, data
+    emit_u64(stub, data);
+    emit(stub, {0x48, 0x83, 0x7b, 0x08, 0x00});  // cmp qword [rbx+8], 0
+    emit(stub, {0x75, kSkipLoadLibrary});        // jne
+    emit(stub, {0x48, 0xb9});                    // movabs rcx, path
+    emit_u64(stub, path);
+    emit(stub, {0x48, 0xb8});  // movabs rax, LoadLibraryA
     emit_u64(stub, load_library);
-    emit_u8(stub, 0xff);
-    emit_u8(stub, 0xd0);  // call LoadLibraryA
-    emit_u8(stub, 0x48);
-    emit_u8(stub, 0x89);
-    emit_u8(stub, 0x03);  // mov [rbx], rax
-    emit_u8(stub, 0x48);
-    emit_u8(stub, 0xc7);
-    emit_u8(stub, 0x43);
-    emit_u8(stub, 0x08);
-    emit_u8(stub, 0x01);
-    emit_u8(stub, 0x00);
-    emit_u8(stub, 0x00);
-    emit_u8(stub, 0x00);  // mov qword [rbx+8], 1
+    emit(stub, {0xff, 0xd0});                                      // call rax
+    emit(stub, {0x48, 0x89, 0x03});                                // mov [rbx], rax
+    emit(stub, {0x48, 0xc7, 0x43, 0x08, 0x01, 0x00, 0x00, 0x00});  // mov qword [rbx+8], 1
     emit_restore_and_jmp(stub, original);
     return stub;
 }
@@ -244,11 +196,6 @@ std::optional<Placement> find_placement(const ProcMem& mem, const std::vector<Ma
     return std::nullopt;
 }
 
-std::expected<void, std::string> write_bytes(const ProcMem& mem, std::uintptr_t addr,
-                                             const void* data, std::size_t size) {
-    return mem.write(addr, std::span(static_cast<const std::byte*>(data), size));
-}
-
 // imports a running frame loop hits constantly, most-reliable first
 constexpr std::array<std::string_view, 6> kHotFunctions{
     "QueryPerformanceCounter", "GetTickCount64", "PeekMessageW", "GetMessageW", "SleepEx",
@@ -258,23 +205,33 @@ constexpr std::array<std::string_view, 6> kHotFunctions{
 // at or above this score the module is a known engine, not a generic exe/dll
 constexpr int kEngineFloor = 80;
 
+// first matching suffix wins, so the named runtimes must precede the bare ".exe"/".dll"
+constexpr std::array<std::pair<std::string_view, int>, 11> kModuleScores{{
+    {"unityplayer.dll", 100},
+    {"gameassembly.dll", 90},  // Unity IL2CPP
+    {"engine2.dll", 85},       // Source 2
+    {"engine.dll", 85},        // Source 1
+    {"crysystem.dll", 85},     // CryEngine
+    {"tier0.dll", 80},         // Source runtime
+    {".exe", 50},
+    {"kernel32.dll", 0},
+    {"ntdll.dll", 0},
+    {"user32.dll", 0},
+    {".dll", 20},
+}};
+
 int module_preference(std::string_view path) {
-    const auto base = path_ends_with_ignore_case(path, "unityplayer.dll")    ? 100
-                      : path_ends_with_ignore_case(path, "gameassembly.dll") ? 90   // Unity IL2CPP
-                      : path_ends_with_ignore_case(path, "engine2.dll")      ? 85   // Source 2
-                      : path_ends_with_ignore_case(path, "engine.dll")       ? 85   // Source 1
-                      : path_ends_with_ignore_case(path, "crysystem.dll")    ? 85   // CryEngine
-                      : path_ends_with_ignore_case(path, "tier0.dll")        ? 80   // Source runtime
-                      : path_ends_with_ignore_case(path, ".exe")             ? 50
-                      : path_ends_with_ignore_case(path, "kernel32.dll")     ? 0
-                      : path_ends_with_ignore_case(path, "ntdll.dll")        ? 0
-                      : path_ends_with_ignore_case(path, "user32.dll")       ? 0
-                      : path_ends_with_ignore_case(path, ".dll")             ? 20
-                                                                             : -1;
-    return base;
+    for (const auto& [suffix, score] : kModuleScores) {
+        if (path_ends_with_ignore_case(path, suffix)) {
+            return score;
+        }
+    }
+    return -1;
 }
 
-bool is_named_engine(std::string_view path) { return module_preference(path) >= kEngineFloor; }
+bool is_named_engine(std::string_view path) {
+    return module_preference(path) >= kEngineFloor;
+}
 
 // engine and game images are large, launcher stubs and helper dlls small, so
 // total size is evidence of which module carries the frame loop
@@ -301,7 +258,7 @@ std::optional<IatCandidate> probe_image(const ProcMem& mem, const std::vector<Ma
     std::optional<IatHook> chosen;
     int hot_count = 0;
     for (const auto function : kHotFunctions) {
-        auto slot = find_iat_slot(mem, image.start, {}, function);
+        auto slot = find_iat_slot(mem, image.start, function);
         if (!slot) {
             continue;
         }
@@ -427,7 +384,7 @@ std::expected<void, std::string> inject_dll_via_iat(const pid_t pid,
     if (stub.size() > kStubBudget) {
         return std::unexpected("LoadLibrary stub is larger than the reserved cave");
     }
-    if (auto err = write_bytes(*mem, placement->stub, stub.data(), stub.size()); !err) {
+    if (auto err = mem->write(placement->stub, std::as_bytes(std::span(stub))); !err) {
         return err;
     }
 

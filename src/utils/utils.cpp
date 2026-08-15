@@ -7,7 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <regex>
-#include <sstream>
+#include <set>
 #include <unistd.h>
 
 namespace fs = std::filesystem;
@@ -18,13 +18,6 @@ std::function<void(const std::string&)> g_log_callback;
 
 namespace {
 
-std::string home_directory() {
-    if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
-        return home;
-    }
-    return {};
-}
-
 std::vector<std::string> steam_root_candidates() {
     std::vector<std::string> candidates;
     if (const char* env = std::getenv("STEAM_COMPAT_CLIENT_INSTALL_PATH");
@@ -32,7 +25,7 @@ std::vector<std::string> steam_root_candidates() {
         candidates.emplace_back(env);
     }
 
-    const auto home = home_directory();
+    const auto home = home_dir();
     if (home.empty()) {
         return candidates;
     }
@@ -56,14 +49,13 @@ std::vector<std::string> parse_library_folders_vdf(const fs::path& path) {
                               std::istreambuf_iterator<char>());
     static const std::regex path_re(R"rx("path"\s+"([^"]+)")rx");
     std::vector<std::string> paths;
-    std::string seen;
+    std::set<std::string> seen;
 
     for (std::sregex_iterator it(content.begin(), content.end(), path_re), end; it != end; ++it) {
         const std::string value = (*it)[1].str();
-        if (value.empty() || seen.find(value) != std::string::npos) {
+        if (value.empty() || !seen.insert(value).second) {
             continue;
         }
-        seen += value + '\n';
         paths.push_back(value);
     }
     return paths;
@@ -77,25 +69,108 @@ std::string capitalize_first(std::string message) {
     return message;
 }
 
+std::vector<std::string> compat_data_candidates(const std::string& app_id) {
+    std::vector<std::string> candidates;
+    if (app_id.empty()) {
+        return candidates;
+    }
+
+    std::set<std::string> seen;
+    for (const auto& library : steam_library_roots()) {
+        auto path = (fs::path(library) / "steamapps" / "compatdata" / app_id).string();
+        if (seen.insert(path).second) {
+            candidates.push_back(std::move(path));
+        }
+    }
+    return candidates;
+}
+
 }  // namespace
 
-std::string expand_path(std::string path) {
-    while (!path.empty() && std::isspace(static_cast<unsigned char>(path.back()))) {
-        path.pop_back();
+std::string trim(std::string_view value) {
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
+        value.remove_prefix(1);
     }
-    while (!path.empty() && std::isspace(static_cast<unsigned char>(path.front()))) {
-        path.erase(path.begin());
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
+        value.remove_suffix(1);
     }
+    return std::string(value);
+}
+
+std::string to_lower(std::string_view value) {
+    std::string out(value);
+    std::transform(out.begin(), out.end(), out.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return out;
+}
+
+std::vector<std::string> split(std::string_view text, char delimiter) {
+    std::vector<std::string> parts;
+    for (auto& piece : split_fields(text, delimiter)) {
+        if (!piece.empty()) {
+            parts.push_back(std::move(piece));
+        }
+    }
+    return parts;
+}
+
+std::vector<std::string> split_fields(std::string_view text, char delimiter) {
+    std::vector<std::string> parts;
+    while (true) {
+        const auto pos = text.find(delimiter);
+        parts.emplace_back(text.substr(0, pos));
+        if (pos == std::string_view::npos) {
+            return parts;
+        }
+        text.remove_prefix(pos + 1);
+    }
+}
+
+std::string home_dir() {
+    if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
+        return home;
+    }
+    return {};
+}
+
+std::string expand_path(std::string_view path) {
+    const std::string trimmed = trim(path);
+    if (trimmed.empty()) {
+        return trimmed;
+    }
+    if (trimmed == "~") {
+        return home_dir();
+    }
+    if (trimmed.starts_with("~/")) {
+        return home_dir() + trimmed.substr(1);
+    }
+    return trimmed;
+}
+
+bool is_executable(const std::string& path) {
     if (path.empty()) {
-        return path;
+        return false;
     }
-    if (path == "~") {
-        return home_directory();
+    std::error_code ec;
+    return !fs::is_directory(path, ec) && ::access(path.c_str(), X_OK) == 0;
+}
+
+std::string find_in_path(std::string_view name) {
+    if (is_executable(std::string(name))) {
+        return std::string(name);
     }
-    if (path.starts_with("~/")) {
-        return home_directory() + path.substr(1);
+
+    const char* path_env = std::getenv("PATH");
+    if (path_env == nullptr) {
+        return {};
     }
-    return path;
+    for (const auto& directory : split(path_env, ':')) {
+        if (const auto candidate = (fs::path(directory) / name).string();
+            is_executable(candidate)) {
+            return candidate;
+        }
+    }
+    return {};
 }
 
 std::string steam_root() {
@@ -109,14 +184,12 @@ std::string steam_root() {
 
 std::vector<std::string> steam_library_roots() {
     std::vector<std::string> roots;
-    std::string seen;
+    std::set<std::string> seen;
 
     const auto add_root = [&](const std::string& root) {
-        if (root.empty() || seen.find(root) != std::string::npos) {
-            return;
+        if (!root.empty() && seen.insert(root).second) {
+            roots.push_back(root);
         }
-        seen += root + '\n';
-        roots.push_back(root);
     };
 
     for (const auto& root : steam_root_candidates()) {
@@ -134,28 +207,6 @@ std::vector<std::string> steam_library_roots() {
     return roots;
 }
 
-namespace {
-
-std::vector<std::string> compat_data_candidates(const std::string& app_id) {
-    std::vector<std::string> candidates;
-    std::string seen;
-    const auto trimmed = app_id;
-    if (trimmed.empty()) {
-        return candidates;
-    }
-
-    for (const auto& library : steam_library_roots()) {
-        const auto path = (fs::path(library) / "steamapps" / "compatdata" / trimmed).string();
-        if (seen.find(path) == std::string::npos) {
-            seen += path + '\n';
-            candidates.push_back(path);
-        }
-    }
-    return candidates;
-}
-
-}  // namespace
-
 std::string compat_data_path(const std::string& app_id) {
     if (const char* env = std::getenv("STEAM_COMPAT_DATA_PATH"); env != nullptr && *env != '\0') {
         return env;
@@ -169,21 +220,17 @@ std::string compat_data_path(const std::string& app_id) {
 }
 
 std::string mods_dir_for_app_id(const std::string& app_id) {
-    const fs::path suffix =
-        fs::path("pfx") / "drive_c" / "users" / "steamuser" / "Documents" / "proton-inject-mods";
-
     auto candidates = compat_data_candidates(app_id);
     if (const auto preferred = compat_data_path(app_id); !preferred.empty()) {
         candidates.insert(candidates.begin(), preferred);
     }
 
-    std::string seen;
+    std::set<std::string> seen;
     for (const auto& compat_root : candidates) {
-        if (seen.find(compat_root) != std::string::npos) {
+        if (!seen.insert(compat_root).second) {
             continue;
         }
-        seen += compat_root + '\n';
-        const auto mods_path = fs::path(compat_root) / suffix;
+        const auto mods_path = fs::path(compat_root) / "pfx" / kModsSubpath;
         if (fs::exists(mods_path)) {
             return mods_path.string();
         }
@@ -191,11 +238,54 @@ std::string mods_dir_for_app_id(const std::string& app_id) {
     return {};
 }
 
+std::string state_dir() {
+    const auto home = home_dir();
+    return home.empty() ? std::string{} : home + "/.proton-inject";
+}
+
+std::string default_wine_prefix() {
+    const auto state = state_dir();
+    return state.empty() ? std::string{} : state + "/pfx";
+}
+
+void migrate_legacy_state_dir() {
+    const auto home = home_dir();
+    if (home.empty()) {
+        return;
+    }
+
+    const fs::path legacy = fs::path(home) / ".proton-injector";
+    const fs::path current = fs::path(home) / ".proton-inject";
+    std::error_code ec;
+    if (!fs::is_directory(legacy, ec) || fs::exists(current, ec)) {
+        return;
+    }
+
+    fs::rename(legacy, current, ec);
+    if (ec) {
+        debug("Could not move " + legacy.string() + " to " + current.string() + ": " +
+              ec.message());
+        return;
+    }
+    debug("Moved state directory " + legacy.string() + " to " + current.string());
+}
+
+std::string relocate_legacy_state_path(std::string path) {
+    const auto home = home_dir();
+    if (home.empty()) {
+        return path;
+    }
+    const std::string legacy = home + "/.proton-injector";
+    if (path.starts_with(legacy)) {
+        path.replace(0, legacy.size(), home + "/.proton-inject");
+    }
+    return path;
+}
+
 std::string to_windows_path(const std::string& path) {
     std::error_code ec;
     const auto absolute = fs::absolute(path, ec);
-    const auto& resolved = ec ? path : absolute.string();
-    std::string wine_path = resolved;
+    std::string wine_path = ec ? path : absolute.string();
     std::replace(wine_path.begin(), wine_path.end(), '/', '\\');
     return "Z:" + wine_path;
 }

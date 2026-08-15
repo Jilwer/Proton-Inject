@@ -1,7 +1,7 @@
 #include "native/proc_mem.hpp"
 
-#include <algorithm>
-#include <cctype>
+#include "utils/utils.hpp"
+
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -19,20 +19,13 @@ std::string errno_string() {
     return std::strerror(errno);
 }
 
+}  // namespace
+
 std::string hex_addr(std::uintptr_t addr) {
     std::ostringstream out;
     out << "0x" << std::hex << addr;
     return out.str();
 }
-
-std::string to_lower_copy(std::string_view value) {
-    std::string out(value);
-    std::transform(out.begin(), out.end(), out.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return out;
-}
-
-}  // namespace
 
 ProcMem::ProcMem(ProcMem&& other) noexcept : fd_(other.fd_), pid_(other.pid_) {
     other.fd_ = -1;
@@ -136,7 +129,7 @@ bool path_ends_with_ignore_case(std::string_view path, std::string_view suffix) 
     if (path.size() < suffix.size()) {
         return false;
     }
-    return to_lower_copy(path.substr(path.size() - suffix.size())) == to_lower_copy(suffix);
+    return to_lower(path.substr(path.size() - suffix.size())) == to_lower(suffix);
 }
 
 std::expected<std::vector<Mapping>, std::string> parse_maps(pid_t pid) {

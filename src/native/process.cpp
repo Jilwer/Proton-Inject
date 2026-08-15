@@ -1,13 +1,12 @@
 #include "native/process.hpp"
 
 #include "native/proc_mem.hpp"
+#include "utils/utils.hpp"
 
-#include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
-#include <string>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -16,14 +15,32 @@ namespace proton_inject {
 
 namespace {
 
-std::string to_lower_copy(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return value;
+// the game's own name can appear anywhere in the command line: Proton launches it through a
+// chain of wrappers, so a match on any argument's basename is what identifies the process.
+bool cmdline_mentions_exe(const fs::path& proc_entry, std::string_view wanted_lower) {
+    std::ifstream cmdline(proc_entry / "cmdline", std::ios::binary);
+    if (!cmdline) {
+        return false;
+    }
+    std::string raw((std::istreambuf_iterator<char>(cmdline)), std::istreambuf_iterator<char>());
+    for (char& ch : raw) {
+        if (ch == '\0') {
+            ch = ' ';
+        }
+    }
+
+    std::istringstream fields(raw);
+    std::string field;
+    while (fields >> field) {
+        if (to_lower(exe_basename(field)) == wanted_lower) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::vector<pid_t> pids_matching_exe(std::string_view process_name) {
-    const auto want = to_lower_copy(exe_basename(process_name));
+    const auto wanted = to_lower(exe_basename(process_name));
     std::vector<pid_t> pids;
 
     std::error_code ec;
@@ -35,28 +52,7 @@ std::vector<pid_t> pids_matching_exe(std::string_view process_name) {
         if (pid_name.empty() || !std::isdigit(static_cast<unsigned char>(pid_name.front()))) {
             continue;
         }
-
-        std::ifstream cmdline(entry.path() / "cmdline", std::ios::binary);
-        if (!cmdline) {
-            continue;
-        }
-        std::string raw((std::istreambuf_iterator<char>(cmdline)),
-                        std::istreambuf_iterator<char>());
-        for (char& ch : raw) {
-            if (ch == '\0') {
-                ch = ' ';
-            }
-        }
-        std::istringstream fields(raw);
-        std::string field;
-        bool match = false;
-        while (fields >> field) {
-            if (to_lower_copy(exe_basename(field)) == want) {
-                match = true;
-                break;
-            }
-        }
-        if (match) {
+        if (cmdline_mentions_exe(entry.path(), wanted)) {
             pids.push_back(static_cast<pid_t>(std::stoi(pid_name)));
         }
     }
@@ -66,24 +62,27 @@ std::vector<pid_t> pids_matching_exe(std::string_view process_name) {
 }  // namespace
 
 std::string exe_basename(std::string_view target) {
-    std::string value(target);
-    while (!value.empty() && (value.back() == '/' || value.back() == '\\')) {
-        value.pop_back();
+    while (!target.empty() && (target.back() == '/' || target.back() == '\\')) {
+        target.remove_suffix(1);
     }
-    const auto pos = value.find_last_of("/\\");
-    if (pos != std::string::npos) {
-        return value.substr(pos + 1);
+    const auto pos = target.find_last_of("/\\");
+    if (pos != std::string_view::npos) {
+        target.remove_prefix(pos + 1);
     }
-    return value;
+    return std::string(target);
+}
+
+bool is_process_running(std::string_view process_name) {
+    return !pids_matching_exe(process_name).empty();
 }
 
 std::expected<pid_t, std::string> find_wine_target_pid(std::string_view process_name) {
     const auto pids = pids_matching_exe(process_name);
+    const auto want_exe = exe_basename(process_name);
     if (pids.empty()) {
-        return std::unexpected("Game process " + exe_basename(process_name) + " not found");
+        return std::unexpected("Game process " + want_exe + " not found");
     }
 
-    const auto want_exe = exe_basename(process_name);
     pid_t kernel32_only = -1;
     for (const pid_t pid : pids) {
         const auto maps = parse_maps(pid);
@@ -108,7 +107,7 @@ std::expected<pid_t, std::string> find_wine_target_pid(std::string_view process_
         return kernel32_only;
     }
     return std::unexpected("Found " + std::to_string(pids.size()) + " process(es) named " +
-                           exe_basename(process_name) +
+                           want_exe +
                            " but none have kernel32.dll mapped (not a Wine/Proton process yet?)");
 }
 
