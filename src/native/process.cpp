@@ -22,16 +22,8 @@ bool cmdline_mentions_exe(const fs::path& proc_entry, std::string_view wanted_lo
     if (!cmdline) {
         return false;
     }
-    std::string raw((std::istreambuf_iterator<char>(cmdline)), std::istreambuf_iterator<char>());
-    for (char& ch : raw) {
-        if (ch == '\0') {
-            ch = ' ';
-        }
-    }
-
-    std::istringstream fields(raw);
     std::string field;
-    while (fields >> field) {
+    while (std::getline(cmdline, field, '\0')) {
         if (to_lower(exe_basename(field)) == wanted_lower) {
             return true;
         }
